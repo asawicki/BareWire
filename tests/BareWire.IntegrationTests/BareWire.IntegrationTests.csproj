@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="AwesomeAssertions" />
+    <PackageReference Include="Aspire.Hosting.Testing" />
+    <PackageReference Include="Aspire.Hosting.RabbitMQ" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BareWire.AppHost\BareWire.AppHost.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\BareWire.Abstractions\BareWire.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\BareWire.Core\BareWire.Core.csproj" />
+    <ProjectReference Include="..\..\src\BareWire.Serialization.Json\BareWire.Serialization.Json.csproj" />
+    <ProjectReference Include="..\..\src\BareWire.Transport.RabbitMQ\BareWire.Transport.RabbitMQ.csproj" />
+    <ProjectReference Include="..\..\src\BareWire.Saga\BareWire.Saga.csproj" />
+    <ProjectReference Include="..\..\src\BareWire.Saga.EntityFramework\BareWire.Saga.EntityFramework.csproj" />
+    <ProjectReference Include="..\..\src\BareWire.Outbox\BareWire.Outbox.csproj" />
+    <ProjectReference Include="..\..\src\BareWire.Outbox.EntityFramework\BareWire.Outbox.EntityFramework.csproj" />
+    <ProjectReference Include="..\..\src\BareWire.Observability\BareWire.Observability.csproj" />
+    <ProjectReference Include="..\..\src\BareWire.Testing\BareWire.Testing.csproj" />
+  </ItemGroup>
+
+</Project>

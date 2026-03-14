@@ -1,0 +1,24 @@
+<Solution>
+  <Folder Name="/samples/">
+    <Project Path="samples/BareWire.Samples.RabbitMQ/BareWire.Samples.RabbitMQ.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/BareWire.Abstractions/BareWire.Abstractions.csproj" />
+    <Project Path="src/BareWire.Core/BareWire.Core.csproj" />
+    <Project Path="src/BareWire.Observability/BareWire.Observability.csproj" />
+    <Project Path="src/BareWire.Outbox.EntityFramework/BareWire.Outbox.EntityFramework.csproj" />
+    <Project Path="src/BareWire.Outbox/BareWire.Outbox.csproj" />
+    <Project Path="src/BareWire.Saga.EntityFramework/BareWire.Saga.EntityFramework.csproj" />
+    <Project Path="src/BareWire.Saga/BareWire.Saga.csproj" />
+    <Project Path="src/BareWire.Serialization.Json/BareWire.Serialization.Json.csproj" />
+    <Project Path="src/BareWire.Testing/BareWire.Testing.csproj" />
+    <Project Path="src/BareWire.Transport.RabbitMQ/BareWire.Transport.RabbitMQ.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/BareWire.AppHost/BareWire.AppHost.csproj" />
+    <Project Path="tests/BareWire.Benchmarks/BareWire.Benchmarks.csproj" />
+    <Project Path="tests/BareWire.ContractTests/BareWire.ContractTests.csproj" />
+    <Project Path="tests/BareWire.IntegrationTests/BareWire.IntegrationTests.csproj" />
+    <Project Path="tests/BareWire.UnitTests/BareWire.UnitTests.csproj" />
+  </Folder>
+</Solution>

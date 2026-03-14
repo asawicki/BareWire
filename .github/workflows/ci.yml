@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('Directory.Packages.props') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore BareWire.slnx
+
+      - name: Build
+        run: dotnet build BareWire.slnx --no-restore -c Release
+
+      - name: Unit Tests
+        run: dotnet test tests/BareWire.UnitTests/ --no-build -c Release --logger "trx;LogFileName=unit-tests.trx" --results-directory ./test-results
+
+      - name: Integration Tests
+        run: dotnet test tests/BareWire.IntegrationTests/ --no-build -c Release --logger "trx;LogFileName=integration-tests.trx" --results-directory ./test-results
+
+      - name: Contract Tests
+        run: dotnet test tests/BareWire.ContractTests/ --no-build -c Release --logger "trx;LogFileName=contract-tests.trx" --results-directory ./test-results
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: ./test-results/*.trx

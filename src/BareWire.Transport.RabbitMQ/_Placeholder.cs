@@ -1,0 +1,1 @@
+namespace BareWire.Transport.RabbitMQ;
