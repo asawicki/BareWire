@@ -1,6 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <PackageReference Include="NSubstitute" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\BareWire.Abstractions\BareWire.Abstractions.csproj" />
     <ProjectReference Include="..\BareWire.Core\BareWire.Core.csproj" />
   </ItemGroup>

@@ -1,2 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="BareWire.UnitTests" />
+    <InternalsVisibleTo Include="BareWire.IntegrationTests" />
+    <InternalsVisibleTo Include="BareWire.Testing" />
+  </ItemGroup>
+
 </Project>

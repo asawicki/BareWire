@@ -2,10 +2,9 @@ using BenchmarkDotNet.Attributes;
 
 namespace BareWire.Benchmarks;
 
-[MemoryDiagnoser]
-public class ConsumeBenchmarks
+// ConsumeBenchmarks require consume loop + consumer dispatch (not yet implemented).
+// Implementation deferred until consume pipeline is available (Phase 2+).
+[MemoryDiagnoser(displayGenColumns: true)]
+public sealed class ConsumeBenchmarks
 {
-    // Placeholder — real benchmarks will be added in task 2.6
-    // [Benchmark]
-    // public void ConsumeRawJson() { }
 }

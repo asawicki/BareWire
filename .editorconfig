@@ -80,3 +80,9 @@ dotnet_style_require_accessibility_modifiers = for_non_interface_members:warning
 
 # XML doc
 dotnet_diagnostic.CS1591.severity = none
+
+[tests/**/*.cs]
+# Test methods use MethodName_Scenario_ExpectedResult naming — underscores are intentional
+dotnet_diagnostic.CA1707.severity = none
+# Test factory helpers intentionally pass default/None tokens to isolate the SUT
+dotnet_diagnostic.xUnit1051.severity = none
