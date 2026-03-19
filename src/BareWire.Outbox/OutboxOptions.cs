@@ -1,0 +1,61 @@
+using BareWire.Abstractions.Exceptions;
+
+namespace BareWire.Outbox;
+
+internal sealed record OutboxOptions
+{
+    internal static readonly OutboxOptions Default = new();
+
+    public TimeSpan PollingInterval { get; init; } = TimeSpan.FromSeconds(1);
+    public int DispatchBatchSize { get; init; } = 100;
+    public TimeSpan InboxRetention { get; init; } = TimeSpan.FromDays(7);
+    public TimeSpan OutboxRetention { get; init; } = TimeSpan.FromDays(7);
+    public TimeSpan InboxLockTimeout { get; init; } = TimeSpan.FromSeconds(30);
+    public TimeSpan CleanupInterval { get; init; } = TimeSpan.FromHours(1);
+
+    internal void Validate()
+    {
+        if (PollingInterval <= TimeSpan.Zero)
+        {
+            throw new BareWireConfigurationException(
+                $"{nameof(PollingInterval)} must be greater than zero. Got: {PollingInterval}");
+        }
+
+        if (DispatchBatchSize <= 0 || DispatchBatchSize > 10_000)
+        {
+            throw new BareWireConfigurationException(
+                $"{nameof(DispatchBatchSize)} must be between 1 and 10,000. Got: {DispatchBatchSize}");
+        }
+
+        if (InboxRetention <= TimeSpan.Zero)
+        {
+            throw new BareWireConfigurationException(
+                $"{nameof(InboxRetention)} must be greater than zero. Got: {InboxRetention}");
+        }
+
+        if (OutboxRetention <= TimeSpan.Zero)
+        {
+            throw new BareWireConfigurationException(
+                $"{nameof(OutboxRetention)} must be greater than zero. Got: {OutboxRetention}");
+        }
+
+        if (InboxLockTimeout <= TimeSpan.Zero)
+        {
+            throw new BareWireConfigurationException(
+                $"{nameof(InboxLockTimeout)} must be greater than zero. Got: {InboxLockTimeout}");
+        }
+
+        if (InboxRetention <= InboxLockTimeout)
+        {
+            throw new BareWireConfigurationException(
+                $"{nameof(InboxRetention)} ({InboxRetention}) must be greater than " +
+                $"{nameof(InboxLockTimeout)} ({InboxLockTimeout}) to prevent locks from expiring before cleanup.");
+        }
+
+        if (CleanupInterval <= TimeSpan.Zero)
+        {
+            throw new BareWireConfigurationException(
+                $"{nameof(CleanupInterval)} must be greater than zero. Got: {CleanupInterval}");
+        }
+    }
+}

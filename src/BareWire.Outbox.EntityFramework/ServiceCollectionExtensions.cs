@@ -1,0 +1,84 @@
+using BareWire.Abstractions.Outbox;
+using BareWire.Abstractions.Pipeline;
+using BareWire.Outbox;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace BareWire.Outbox.EntityFramework;
+
+/// <summary>
+/// Extension methods for registering the BareWire transactional outbox/inbox
+/// persistence layer using Entity Framework Core.
+/// </summary>
+public static class ServiceCollectionExtensions
+{
+    /// <summary>
+    /// Registers the BareWire transactional outbox and inbox services backed by
+    /// Entity Framework Core for reliable, at-least-once message delivery.
+    /// </summary>
+    /// <param name="services">The service collection to register services into.</param>
+    /// <param name="configureDbContext">
+    /// A delegate that configures the <see cref="DbContextOptionsBuilder"/> for
+    /// <see cref="OutboxDbContext"/>.
+    /// For example: <c>options => options.UseSqlServer(connectionString)</c>.
+    /// </param>
+    /// <param name="configureOutbox">
+    /// An optional delegate for customizing outbox behavior such as polling interval,
+    /// batch size, and retention periods. When <see langword="null"/>, defaults are used.
+    /// </param>
+    /// <returns>The same <paramref name="services"/> instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when <paramref name="services"/> or <paramref name="configureDbContext"/> is
+    /// <see langword="null"/>.
+    /// </exception>
+    /// <exception cref="BareWire.Abstractions.Exceptions.BareWireConfigurationException">
+    /// Thrown when the outbox configuration supplied via <paramref name="configureOutbox"/>
+    /// contains invalid values (e.g. non-positive intervals, out-of-range batch size).
+    /// </exception>
+    public static IServiceCollection AddBareWireOutbox(
+        this IServiceCollection services,
+        Action<DbContextOptionsBuilder> configureDbContext,
+        Action<IOutboxConfigurator>? configureOutbox = null)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configureDbContext);
+
+        // Register the EF Core DbContext.
+        services.AddDbContext<OutboxDbContext>(configureDbContext);
+
+        // Register the EF Core store implementations as scoped — they depend on the
+        // scoped OutboxDbContext and must not outlive it.
+        services.AddScoped<IOutboxStore, EfCoreOutboxStore>();
+        services.AddScoped<IInboxStore, EfCoreInboxStore>();
+
+        // Register InboxFilter as scoped — it depends on the scoped IInboxStore.
+        services.AddScoped<InboxFilter>();
+
+        // Register the transactional middleware as scoped (depends on OutboxDbContext + EfCoreInboxStore).
+        services.AddScoped<IMessageMiddleware, TransactionalOutboxMiddleware>();
+
+        // Register the background services that poll and dispatch pending outbox messages
+        // and periodically clean up expired outbox/inbox records.
+        services.AddHostedService<OutboxDispatcher>();
+        services.AddHostedService<OutboxCleanupService>();
+
+        // Build and register OutboxOptions as a singleton.
+        // OutboxDispatcher and OutboxCleanupService resolve it directly from DI.
+        OutboxOptions options;
+
+        if (configureOutbox is not null)
+        {
+            var configurator = new OutboxConfigurator();
+            configureOutbox(configurator);
+            options = configurator.Build(); // validates and throws BareWireConfigurationException on bad values
+        }
+        else
+        {
+            options = OutboxOptions.Default;
+        }
+
+        services.AddSingleton(options);
+
+        return services;
+    }
+}
