@@ -1,1 +1,0 @@
-namespace BareWire.Serialization.Json;
