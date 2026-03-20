@@ -86,14 +86,17 @@ internal sealed partial class ReceiveEndpointRunner
         // Build retry/DLQ middleware chain (task 8.12).
         List<IMessageMiddleware> middlewares = [];
 
-        if (binding.RetryCount > 0 && loggerFactory is not null)
+        if (binding.RetryCount > 0)
         {
+            ILogger<RetryMiddleware> retryLogger = loggerFactory is not null
+                ? loggerFactory.CreateLogger<RetryMiddleware>()
+                : Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance.CreateLogger<RetryMiddleware>();
             IntervalRetryPolicy retryPolicy = new(
                 maxRetries: binding.RetryCount,
                 interval: binding.RetryInterval,
                 handledExceptions: [],
                 ignoredExceptions: []);
-            middlewares.Add(new RetryMiddleware(retryPolicy, loggerFactory.CreateLogger<RetryMiddleware>()));
+            middlewares.Add(new RetryMiddleware(retryPolicy, retryLogger));
         }
 
         // DeadLetterMiddleware logs the error; re-throws so ReceiveEndpointRunner NACKs.
@@ -254,6 +257,7 @@ internal sealed partial class ReceiveEndpointRunner
     {
         bool dispatched = false;
         string messageType = "unknown";
+        string messageIdStr = context.MessageId.ToString();
 
         // Try typed consumers first — first match wins.
         for (int i = 0; i < _invokers.Length; i++)
@@ -265,7 +269,7 @@ internal sealed partial class ReceiveEndpointRunner
                     _scopeFactory,
                     context.RawBody,
                     context.Headers,
-                    context.MessageId.ToString(),
+                    messageIdStr,
                     _publishEndpoint,
                     _sendEndpointProvider,
                     _deserializer,
@@ -283,7 +287,7 @@ internal sealed partial class ReceiveEndpointRunner
             catch (Abstractions.Exceptions.BareWireSerializationException ex)
             {
                 // Deserialization failed for this invoker — log and try the next one.
-                LogDeserializationFailed(_binding.EndpointName, context.MessageId.ToString(), ex);
+                LogDeserializationFailed(_binding.EndpointName, messageIdStr, ex);
                 continue;
             }
         }
@@ -299,7 +303,7 @@ internal sealed partial class ReceiveEndpointRunner
                     bool sagaHandled = await sagaDispatcher.TryDispatchAsync(
                         context.RawBody,
                         context.Headers,
-                        context.MessageId.ToString(),
+                        messageIdStr,
                         _publishEndpoint,
                         _sendEndpointProvider,
                         _deserializer,
@@ -314,7 +318,7 @@ internal sealed partial class ReceiveEndpointRunner
                 }
                 catch (Abstractions.Exceptions.BareWireSerializationException ex)
                 {
-                    LogDeserializationFailed(_binding.EndpointName, context.MessageId.ToString(), ex);
+                    LogDeserializationFailed(_binding.EndpointName, messageIdStr, ex);
                 }
             }
         }
@@ -329,7 +333,7 @@ internal sealed partial class ReceiveEndpointRunner
                     _scopeFactory,
                     context.RawBody,
                     context.Headers,
-                    context.MessageId.ToString(),
+                    messageIdStr,
                     _publishEndpoint,
                     _sendEndpointProvider,
                     _deserializer,

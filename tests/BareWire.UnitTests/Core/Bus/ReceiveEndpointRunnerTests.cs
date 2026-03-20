@@ -128,6 +128,70 @@ public sealed class ReceiveEndpointRunnerTests
         }
     }
 
+    private static (
+        ReceiveEndpointRunner Runner,
+        ThrowingRawConsumer Consumer,
+        ChannelWriter<InboundMessage> MessageWriter,
+        ITransportAdapter Adapter)
+        CreateRunnerWithNullLoggerFactory(int retryCount)
+    {
+        Channel<InboundMessage> channel = Channel.CreateBounded<InboundMessage>(
+            new BoundedChannelOptions(64) { SingleWriter = false, SingleReader = true });
+
+        ITransportAdapter adapter = Substitute.For<ITransportAdapter>();
+        adapter.TransportName.Returns("test");
+        adapter.ConsumeAsync(
+                Arg.Any<string>(),
+                Arg.Any<FlowControlOptions>(),
+                Arg.Any<CancellationToken>())
+               .Returns(callInfo => ReadChannelAsync(channel.Reader, callInfo.ArgAt<CancellationToken>(2)));
+        adapter.SettleAsync(
+                Arg.Any<SettlementAction>(),
+                Arg.Any<InboundMessage>(),
+                Arg.Any<CancellationToken>())
+               .Returns(Task.CompletedTask);
+
+        IMessageDeserializer deserializer = Substitute.For<IMessageDeserializer>();
+        deserializer.ContentType.Returns("application/json");
+
+        ThrowingRawConsumer consumer = new();
+
+        IServiceScopeFactory scopeFactory = Substitute.For<IServiceScopeFactory>();
+        IServiceScope scope = Substitute.For<IServiceScope>();
+        IServiceProvider provider = Substitute.For<IServiceProvider>();
+
+        scopeFactory.CreateScope().Returns(scope);
+        scope.ServiceProvider.Returns(provider);
+        provider.GetService(typeof(ThrowingRawConsumer)).Returns(consumer);
+
+        FlowController flowController = new(NullLogger<FlowController>.Instance);
+
+        EndpointBinding binding = new()
+        {
+            EndpointName = EndpointName,
+            PrefetchCount = 4,
+            Consumers = [],
+            RawConsumers = [typeof(ThrowingRawConsumer)],
+            RetryCount = retryCount,
+            RetryInterval = TimeSpan.Zero,
+        };
+
+        // Deliberately pass null loggerFactory — this is the regression scenario for Bug 1.
+        ReceiveEndpointRunner runner = new(
+            binding,
+            adapter,
+            deserializer,
+            Substitute.For<IPublishEndpoint>(),
+            Substitute.For<ISendEndpointProvider>(),
+            scopeFactory,
+            flowController,
+            new NullInstrumentation(),
+            NullLogger<ReceiveEndpointRunner>.Instance,
+            loggerFactory: null);
+
+        return (runner, consumer, channel.Writer, adapter);
+    }
+
     // ── Tests ─────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -179,6 +243,37 @@ public sealed class ReceiveEndpointRunnerTests
         await adapter.Received(1).SettleAsync(
             SettlementAction.Nack,
             Arg.Is<InboundMessage>(m => m.MessageId == "msg-no-retry"),
+            Arg.Any<CancellationToken>());
+    }
+
+    /// <summary>
+    /// Regression test for Bug 1: RetryMiddleware was silently skipped when loggerFactory was null.
+    /// A user setting RetryCount=3 with no ILoggerFactory registered would get zero retries.
+    /// Fix: use NullLoggerFactory.Instance fallback instead of guarding with loggerFactory is not null.
+    /// </summary>
+    [Fact]
+    public async Task BuildMiddlewareChain_WhenRetryCountPositiveAndLoggerFactoryNull_IncludesRetryMiddleware()
+    {
+        // Arrange — RetryCount=2 with loggerFactory=null.
+        // Before the fix: consumer would be called exactly once (no retry middleware added).
+        // After the fix: consumer must be called 3 times (1 initial + 2 retries).
+        var (runner, consumer, writer, adapter) = CreateRunnerWithNullLoggerFactory(retryCount: 2);
+
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(5));
+
+        await writer.WriteAsync(MakeMessage("msg-null-logger-retry"), cts.Token);
+        writer.Complete();
+
+        // Act
+        await runner.RunAsync(cts.Token);
+
+        // Assert — RetryMiddleware was active despite null loggerFactory.
+        consumer.CallCount.Should().Be(3,
+            because: "RetryCount=2 means 1 original attempt + 2 retries regardless of whether loggerFactory is null");
+
+        await adapter.Received(1).SettleAsync(
+            SettlementAction.Nack,
+            Arg.Is<InboundMessage>(m => m.MessageId == "msg-null-logger-retry"),
             Arg.Any<CancellationToken>());
     }
 }
