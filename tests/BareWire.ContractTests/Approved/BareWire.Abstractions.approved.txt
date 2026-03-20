@@ -95,6 +95,11 @@ namespace BareWire.Abstractions
     {
         System.Threading.Tasks.Task ConsumeAsync(BareWire.Abstractions.RawConsumeContext context);
     }
+    public interface IRequestClientFactory
+    {
+        BareWire.Abstractions.IRequestClient<T> CreateRequestClient<T>()
+            where T :  class;
+    }
     public interface IRequestClient<TRequest>
         where TRequest :  class
     {
@@ -175,6 +180,21 @@ namespace BareWire.Abstractions
 }
 namespace BareWire.Abstractions.Configuration
 {
+    public sealed class ConsumerRegistration : System.IEquatable<BareWire.Abstractions.Configuration.ConsumerRegistration>
+    {
+        public ConsumerRegistration(System.Type ConsumerType, System.Type MessageType) { }
+        public System.Type ConsumerType { get; init; }
+        public System.Type MessageType { get; init; }
+    }
+    public sealed class EndpointBinding
+    {
+        public EndpointBinding() { }
+        public System.Collections.Generic.IReadOnlyList<BareWire.Abstractions.Configuration.ConsumerRegistration> Consumers { get; init; }
+        public required string EndpointName { get; init; }
+        public int PrefetchCount { get; init; }
+        public System.Collections.Generic.IReadOnlyList<System.Type> RawConsumers { get; init; }
+        public System.Collections.Generic.IReadOnlyList<System.Type> SagaTypes { get; init; }
+    }
     public interface IBusConfigurator
     {
         void AddMiddleware<T>()
@@ -194,6 +214,7 @@ namespace BareWire.Abstractions.Configuration
     {
         void ConfigureHeaderMapping(System.Action<BareWire.Abstractions.Headers.IHeaderMappingConfigurator> configure);
         void ConfigureTopology(System.Action<BareWire.Abstractions.Topology.ITopologyConfigurator> configure);
+        void DefaultExchange(string exchangeName);
         void Host(string uri, System.Action<BareWire.Abstractions.Configuration.IHostConfigurator>? configure = null);
         void ReceiveEndpoint(string queueName, System.Action<BareWire.Abstractions.Configuration.IReceiveEndpointConfigurator> configure);
     }
@@ -393,6 +414,11 @@ namespace BareWire.Abstractions.Saga
         where TSaga :  class, BareWire.Abstractions.Saga.ISagaState
     {
         System.Threading.Tasks.Task<TSaga?> FindSingleAsync(System.Linq.Expressions.Expression<System.Func<TSaga, bool>> predicate, System.Threading.CancellationToken cancellationToken = default);
+    }
+    public interface ISagaMessageDispatcher
+    {
+        System.Type StateMachineType { get; }
+        System.Threading.Tasks.Task<bool> TryDispatchAsync(System.Buffers.ReadOnlySequence<byte> body, System.Collections.Generic.IReadOnlyDictionary<string, string> headers, string messageId, BareWire.Abstractions.IPublishEndpoint publishEndpoint, BareWire.Abstractions.ISendEndpointProvider sendEndpointProvider, BareWire.Abstractions.Serialization.IMessageDeserializer deserializer, System.Threading.CancellationToken cancellationToken = default);
     }
     public interface ISagaRepository<TSaga>
         where TSaga :  class, BareWire.Abstractions.Saga.ISagaState

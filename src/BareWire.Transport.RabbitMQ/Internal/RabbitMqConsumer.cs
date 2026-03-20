@@ -15,19 +15,23 @@ internal sealed class RabbitMqConsumer : AsyncDefaultBasicConsumer
 {
     private readonly Channel<InboundMessage> _inboundChannel;
     private readonly RabbitMqHeaderMapper _headerMapper;
+    private readonly string _consumerChannelId;
 
     internal RabbitMqConsumer(
         IChannel channel,
         Channel<InboundMessage> inboundChannel,
-        RabbitMqHeaderMapper headerMapper)
+        RabbitMqHeaderMapper headerMapper,
+        string consumerChannelId)
         : base(channel)
     {
         ArgumentNullException.ThrowIfNull(channel);
         ArgumentNullException.ThrowIfNull(inboundChannel);
         ArgumentNullException.ThrowIfNull(headerMapper);
+        ArgumentException.ThrowIfNullOrEmpty(consumerChannelId);
 
         _inboundChannel = inboundChannel;
         _headerMapper = headerMapper;
+        _consumerChannelId = consumerChannelId;
     }
 
     /// <inheritdoc />
@@ -55,6 +59,7 @@ internal sealed class RabbitMqConsumer : AsyncDefaultBasicConsumer
         // to any custom mapping or passthrough filtering.
         headers["BW-RoutingKey"] = routingKey;
         headers["BW-Exchange"] = exchange;
+        headers["BW-ConsumerChannelId"] = _consumerChannelId;
 
         string messageId = headers.TryGetValue("message-id", out string? mappedId) && !string.IsNullOrEmpty(mappedId)
             ? mappedId
@@ -66,7 +71,13 @@ internal sealed class RabbitMqConsumer : AsyncDefaultBasicConsumer
             body: bodySequence,
             deliveryTag: deliveryTag);
 
-        await _inboundChannel.Writer.WriteAsync(message, cancellationToken).ConfigureAwait(false);
+        // TryWrite returns false when the writer is completed (e.g. the consumer loop has ended).
+        // In that case, nack-requeue the message so the broker can redeliver it to another consumer.
+        if (!_inboundChannel.Writer.TryWrite(message))
+        {
+            await Channel.BasicNackAsync(deliveryTag, multiple: false, requeue: true, cancellationToken)
+                .ConfigureAwait(false);
+        }
     }
 
     /// <inheritdoc />

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -5,8 +6,7 @@ namespace BareWire.Outbox;
 
 internal sealed partial class OutboxCleanupService : IHostedService, IAsyncDisposable
 {
-    private readonly IOutboxStore _outboxStore;
-    private readonly IInboxStore _inboxStore;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly OutboxOptions _options;
     private readonly ILogger<OutboxCleanupService> _logger;
 
@@ -14,13 +14,11 @@ internal sealed partial class OutboxCleanupService : IHostedService, IAsyncDispo
     private Task? _cleanupTask;
 
     public OutboxCleanupService(
-        IOutboxStore outboxStore,
-        IInboxStore inboxStore,
+        IServiceScopeFactory scopeFactory,
         OutboxOptions options,
         ILogger<OutboxCleanupService> logger)
     {
-        _outboxStore = outboxStore ?? throw new ArgumentNullException(nameof(outboxStore));
-        _inboxStore = inboxStore ?? throw new ArgumentNullException(nameof(inboxStore));
+        _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -91,11 +89,15 @@ internal sealed partial class OutboxCleanupService : IHostedService, IAsyncDispo
 
     private async Task RunCleanupAsync(CancellationToken ct)
     {
+        await using AsyncServiceScope scope = _scopeFactory.CreateAsyncScope();
+        IOutboxStore outboxStore = scope.ServiceProvider.GetRequiredService<IOutboxStore>();
+        IInboxStore inboxStore = scope.ServiceProvider.GetRequiredService<IInboxStore>();
+
         LogCleaningOutbox(_logger, _options.OutboxRetention);
-        await _outboxStore.CleanupAsync(_options.OutboxRetention, ct).ConfigureAwait(false);
+        await outboxStore.CleanupAsync(_options.OutboxRetention, ct).ConfigureAwait(false);
 
         LogCleaningInbox(_logger, _options.InboxRetention);
-        await _inboxStore.CleanupAsync(_options.InboxRetention, ct).ConfigureAwait(false);
+        await inboxStore.CleanupAsync(_options.InboxRetention, ct).ConfigureAwait(false);
 
         LogCleanupCompleted(_logger);
     }

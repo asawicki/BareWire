@@ -1,4 +1,5 @@
 using BareWire.Abstractions.Transport;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -6,7 +7,7 @@ namespace BareWire.Outbox;
 
 internal sealed partial class OutboxDispatcher : IHostedService, IAsyncDisposable
 {
-    private readonly IOutboxStore _store;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ITransportAdapter _adapter;
     private readonly OutboxOptions _options;
     private readonly ILogger<OutboxDispatcher> _logger;
@@ -15,12 +16,12 @@ internal sealed partial class OutboxDispatcher : IHostedService, IAsyncDisposabl
     private Task? _pollingTask;
 
     public OutboxDispatcher(
-        IOutboxStore store,
+        IServiceScopeFactory scopeFactory,
         ITransportAdapter adapter,
         OutboxOptions options,
         ILogger<OutboxDispatcher> logger)
     {
-        _store = store ?? throw new ArgumentNullException(nameof(store));
+        _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _adapter = adapter ?? throw new ArgumentNullException(nameof(adapter));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -92,7 +93,10 @@ internal sealed partial class OutboxDispatcher : IHostedService, IAsyncDisposabl
 
     private async Task DispatchBatchAsync(CancellationToken ct)
     {
-        IReadOnlyList<OutboxEntry> pending = await _store
+        await using AsyncServiceScope scope = _scopeFactory.CreateAsyncScope();
+        IOutboxStore store = scope.ServiceProvider.GetRequiredService<IOutboxStore>();
+
+        IReadOnlyList<OutboxEntry> pending = await store
             .GetPendingAsync(_options.DispatchBatchSize, ct)
             .ConfigureAwait(false);
 
@@ -118,7 +122,7 @@ internal sealed partial class OutboxDispatcher : IHostedService, IAsyncDisposabl
         }
 
         await _adapter.SendBatchAsync(messages, ct).ConfigureAwait(false);
-        await _store.MarkDeliveredAsync(ids, ct).ConfigureAwait(false);
+        await store.MarkDeliveredAsync(ids, ct).ConfigureAwait(false);
 
         LogDispatched(_logger, pending.Count);
     }

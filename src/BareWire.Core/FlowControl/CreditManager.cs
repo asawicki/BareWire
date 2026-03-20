@@ -2,9 +2,10 @@ using BareWire.Abstractions;
 
 namespace BareWire.Core.FlowControl;
 
-internal sealed class CreditManager
+internal sealed class CreditManager : IDisposable
 {
     private readonly FlowControlOptions _options;
+    private readonly SemaphoreSlim _creditAvailable = new(0);
     private int _inflightCount;
     private long _inflightBytes;
 
@@ -52,6 +53,18 @@ internal sealed class CreditManager
         Interlocked.Add(ref _inflightBytes, bytes);
     }
 
+    // Tracks bytes for a message whose count slot was already reserved by TryGrantCredits.
+    internal void TrackInflightBytes(long bytes)
+    {
+        Interlocked.Add(ref _inflightBytes, bytes);
+    }
+
+    // Asynchronously waits until a credit slot may be available.
+    internal Task WaitForCreditAsync(CancellationToken cancellationToken)
+    {
+        return _creditAvailable.WaitAsync(cancellationToken);
+    }
+
     internal void ReleaseInflight(int count, long bytes)
     {
         // Clamp to zero: release can never drive counts below zero even if the caller
@@ -71,5 +84,10 @@ internal sealed class CreditManager
             if (Interlocked.CompareExchange(ref _inflightBytes, nextBytes, currentBytes) == currentBytes)
                 break;
         }
+
+        // Signal waiting consumers that a credit slot is available.
+        _creditAvailable.Release();
     }
+
+    public void Dispose() => _creditAvailable.Dispose();
 }

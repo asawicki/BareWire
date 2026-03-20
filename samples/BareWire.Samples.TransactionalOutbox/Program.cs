@@ -27,7 +27,9 @@
 //   When running via Aspire AppHost, both are provisioned automatically.
 
 using BareWire.Abstractions;
+using BareWire.Abstractions.Configuration;
 using BareWire.Core;
+using BareWire.Transport.RabbitMQ;
 using BareWire.Outbox.EntityFramework;
 using BareWire.Samples.ServiceDefaults;
 using BareWire.Samples.TransactionalOutbox.Consumers;
@@ -36,6 +38,8 @@ using BareWire.Samples.TransactionalOutbox.Messages;
 using BareWire.Samples.TransactionalOutbox.Models;
 using BareWire.Serialization.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Storage;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
@@ -74,31 +78,35 @@ builder.Services.AddBareWireJsonSerializer();
 // Register the consumer in DI (resolved per-message by ConsumerDispatcher).
 builder.Services.AddTransient<TransferConsumer>();
 
+Action<IRabbitMqConfigurator> configureRabbitMq = rmq =>
+{
+    // Connection to the RabbitMQ broker.
+    rmq.Host(rabbitMqConnectionString);
+    rmq.DefaultExchange("transfer.events");
+
+    // ADR-002: Manual topology — declare all exchanges, queues, and bindings explicitly.
+    rmq.ConfigureTopology(t =>
+    {
+        // Fanout exchange — every TransferInitiated published to "transfer.events"
+        // is delivered to the "transfers" consumer queue.
+        t.DeclareExchange("transfer.events", ExchangeType.Fanout, durable: true);
+
+        t.DeclareQueue("transfers", durable: true);
+        t.BindExchangeToQueue("transfer.events", "transfers", routingKey: "#");
+    });
+
+    // Endpoint: TransferConsumer processes TransferInitiated events.
+    // Inbox deduplication is applied transparently by TransactionalOutboxMiddleware.
+    rmq.ReceiveEndpoint("transfers", e =>
+    {
+        e.Consumer<TransferConsumer, TransferInitiated>();
+    });
+};
+
+builder.Services.AddBareWireRabbitMq(configureRabbitMq);
 builder.Services.AddBareWire(cfg =>
 {
-    cfg.UseRabbitMQ(rmq =>
-    {
-        // Connection to the RabbitMQ broker.
-        rmq.Host(rabbitMqConnectionString);
-
-        // ADR-002: Manual topology — declare all exchanges, queues, and bindings explicitly.
-        rmq.ConfigureTopology(t =>
-        {
-            // Fanout exchange — every TransferInitiated published to "transfer.events"
-            // is delivered to the "transfers" consumer queue.
-            t.DeclareExchange("transfer.events", ExchangeType.Fanout, durable: true);
-
-            t.DeclareQueue("transfers", durable: true);
-            t.BindExchangeToQueue("transfer.events", "transfers", routingKey: "#");
-        });
-
-        // Endpoint: TransferConsumer processes TransferInitiated events.
-        // Inbox deduplication is applied transparently by TransactionalOutboxMiddleware.
-        rmq.ReceiveEndpoint("transfers", e =>
-        {
-            e.Consumer<TransferConsumer, TransferInitiated>();
-        });
-    });
+    cfg.UseRabbitMQ(configureRabbitMq);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -127,14 +135,39 @@ builder.Services.AddBareWireOutbox(
 WebApplication app = builder.Build();
 
 // Development only — use migrations in production.
+// EnsureCreatedAsync is a no-op when the database already has tables (even from other samples
+// sharing the same connection string). Use GenerateCreateScript + raw SQL for robustness.
 using (IServiceScope scope = app.Services.CreateScope())
 {
     TransferDbContext transferDb = scope.ServiceProvider.GetRequiredService<TransferDbContext>();
     await transferDb.Database.EnsureCreatedAsync().ConfigureAwait(false);
 
-    // Ensure the outbox/inbox schema is also created in the same database.
+    // EnsureCreatedAsync is a no-op when ANY table exists in the DB (shared by multiple samples).
+    // Generate and execute the DDL manually to ensure Transfers table is created.
+    string createScript = transferDb.Database.GenerateCreateScript();
+    foreach (string statement in createScript.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+    {
+        if (string.IsNullOrWhiteSpace(statement)) continue;
+        try
+        {
+            await transferDb.Database.ExecuteSqlRawAsync(statement).ConfigureAwait(false);
+        }
+        catch (Npgsql.PostgresException)
+        {
+            // Table/index already exists — safe to ignore in development.
+        }
+    }
+
     OutboxDbContext outboxDb = scope.ServiceProvider.GetRequiredService<OutboxDbContext>();
-    await outboxDb.Database.EnsureCreatedAsync().ConfigureAwait(false);
+    try
+    {
+        var outboxCreator = outboxDb.Database.GetInfrastructure().GetRequiredService<IRelationalDatabaseCreator>();
+        await outboxCreator.CreateTablesAsync().ConfigureAwait(false);
+    }
+    catch (Npgsql.PostgresException)
+    {
+        // Tables already exist from a previous run — safe to ignore in development.
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -219,7 +252,7 @@ app.MapGet("/outbox/pending", async (
     // SqlQuery<T> requires a record/class with matching column names.
     // We use a simple count query to avoid exposing internal OutboxMessage structure.
     int pendingCount = await outboxDb.Database
-        .SqlQuery<int>($"SELECT COUNT(*)::int FROM \"OutboxMessages\" WHERE \"DeliveredAt\" IS NULL")
+        .SqlQuery<int>($"SELECT COUNT(*)::int AS \"Value\" FROM \"OutboxMessages\" WHERE \"DeliveredAt\" IS NULL")
         .FirstOrDefaultAsync(cancellationToken)
         .ConfigureAwait(false);
 

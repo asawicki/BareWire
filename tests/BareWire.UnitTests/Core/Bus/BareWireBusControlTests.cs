@@ -65,7 +65,13 @@ public sealed class BareWireBusControlTests
             adapter,
             flowController,
             configurator,
-            NullLogger<BareWireBusControl>.Instance);
+            NullLogger<BareWireBusControl>.Instance,
+            topology: null,
+            endpointBindings: [],
+            deserializer: deserializer,
+            scopeFactory: scopeFactory,
+            instrumentation: new NullInstrumentation(),
+            loggerFactory: NullLoggerFactory.Instance);
 
         return (control, bus, adapter, flowController);
     }

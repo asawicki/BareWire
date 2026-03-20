@@ -4,6 +4,7 @@
 
 using AwesomeAssertions;
 using BareWire.Outbox;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
 
@@ -23,6 +24,14 @@ public sealed class OutboxCleanupServiceTests : IAsyncDisposable
         _inboxStore = Substitute.For<IInboxStore>();
         _logger = Substitute.For<ILogger<OutboxCleanupService>>();
 
+        var serviceProvider = Substitute.For<IServiceProvider>();
+        serviceProvider.GetService(typeof(IOutboxStore)).Returns(_outboxStore);
+        serviceProvider.GetService(typeof(IInboxStore)).Returns(_inboxStore);
+        var scope = Substitute.For<IServiceScope>();
+        scope.ServiceProvider.Returns(serviceProvider);
+        var scopeFactory = Substitute.For<IServiceScopeFactory>();
+        scopeFactory.CreateScope().Returns(scope);
+
         // Use a short cleanup interval so the loop fires quickly in tests.
         _options = new OutboxOptions
         {
@@ -31,7 +40,7 @@ public sealed class OutboxCleanupServiceTests : IAsyncDisposable
             InboxRetention = TimeSpan.FromDays(8),   // must be > InboxLockTimeout (30s)
         };
 
-        _sut = new OutboxCleanupService(_outboxStore, _inboxStore, _options, _logger);
+        _sut = new OutboxCleanupService(scopeFactory, _options, _logger);
     }
 
     public async ValueTask DisposeAsync()

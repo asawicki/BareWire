@@ -1,3 +1,4 @@
+using System.Diagnostics.Metrics;
 using BareWire.Abstractions.Observability;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -86,7 +87,7 @@ public static class ServiceCollectionExtensions
 
         // BareWireMetrics wraps IMeterFactory (supplied by the host) to create the "BareWire" Meter.
         // Registered as Singleton so instrument instances are shared across all callers.
-        services.TryAddSingleton<BareWireMetrics>();
+        services.TryAddSingleton(sp => new BareWireMetrics(sp.GetRequiredService<IMeterFactory>()));
 
         // Replace the NullInstrumentation default (registered by AddBareWire via TryAddSingleton)
         // with the real implementation that delegates to BareWireActivitySource, BareWireMetrics,
@@ -95,8 +96,13 @@ public static class ServiceCollectionExtensions
 
         // Register the bus health check so the standard /health endpoint reflects BareWire status.
         // Reports bus + endpoint status only — no connection strings or secrets (SEC-06).
-        services.AddHealthChecks()
-            .AddCheck<BareWireHealthCheck>("barewire", tags: ["barewire", "messaging"]);
+        // Guard against duplicate registration when AddBareWireObservability is called more than once
+        // (e.g. via AddServiceDefaults + direct call).
+        if (!services.Any(d => d.ServiceType == typeof(BareWireHealthCheck)))
+        {
+            services.AddHealthChecks()
+                .AddCheck<BareWireHealthCheck>("barewire", tags: ["barewire", "messaging"]);
+        }
 
         if (configurator.EnableOpenTelemetry)
         {

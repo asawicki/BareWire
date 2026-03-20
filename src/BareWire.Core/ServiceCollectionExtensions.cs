@@ -3,6 +3,7 @@ using BareWire.Abstractions.Configuration;
 using BareWire.Abstractions.Observability;
 using BareWire.Abstractions.Pipeline;
 using BareWire.Abstractions.Serialization;
+using BareWire.Abstractions.Topology;
 using BareWire.Abstractions.Transport;
 using BareWire.Core.Bus;
 using BareWire.Core.Configuration;
@@ -127,7 +128,8 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<FlowController>(),
             sp.GetRequiredService<PublishFlowControlOptions>(),
             sp.GetRequiredService<ILogger<BareWireBus>>(),
-            sp.GetRequiredService<IBareWireInstrumentation>()));
+            sp.GetRequiredService<IBareWireInstrumentation>(),
+            sp.GetService<IRequestClientFactory>()));
 
         // BareWireBusControl — wraps BareWireBus and implements IBusControl / IBus.
         // Uses a factory because the constructor is internal.
@@ -136,7 +138,13 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<ITransportAdapter>(),
             sp.GetRequiredService<FlowController>(),
             sp.GetRequiredService<BusConfigurator>(),
-            sp.GetRequiredService<ILogger<BareWireBusControl>>()));
+            sp.GetRequiredService<ILogger<BareWireBusControl>>(),
+            sp.GetService<TopologyDeclaration>(),
+            sp.GetService<IReadOnlyList<EndpointBinding>>() ?? [],
+            sp.GetRequiredService<IMessageDeserializer>(),
+            sp.GetRequiredService<IServiceScopeFactory>(),
+            sp.GetRequiredService<IBareWireInstrumentation>(),
+            sp.GetRequiredService<ILoggerFactory>()));
 
         // IBusControl and IBus both resolve to the same BareWireBusControl singleton.
         services.AddSingleton<IBusControl>(sp => sp.GetRequiredService<BareWireBusControl>());

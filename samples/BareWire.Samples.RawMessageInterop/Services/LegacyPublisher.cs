@@ -38,31 +38,37 @@ internal sealed partial class LegacyPublisher(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Delay startup to allow the broker to become ready (Aspire WaitFor handles this in
-        // orchestrated mode; the delay here covers standalone Docker / manual runs).
-        await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken).ConfigureAwait(false);
-
-        LogStarting(logger);
-
-        IChannel channel = await GetOrCreateChannelAsync(stoppingToken).ConfigureAwait(false);
-
-        while (!stoppingToken.IsCancellationRequested)
+        try
         {
-            try
-            {
-                await PublishEventAsync(channel, stoppingToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                // Normal shutdown — exit gracefully.
-                break;
-            }
-            catch (Exception ex)
-            {
-                LogPublishFailed(logger, ex);
-            }
-
+            // Delay startup to allow the broker to become ready (Aspire WaitFor handles this in
+            // orchestrated mode; the delay here covers standalone Docker / manual runs).
             await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken).ConfigureAwait(false);
+
+            LogStarting(logger);
+
+            IChannel channel = await GetOrCreateChannelAsync(stoppingToken).ConfigureAwait(false);
+
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                try
+                {
+                    await PublishEventAsync(channel, stoppingToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    LogPublishFailed(logger, ex);
+                }
+
+                await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Normal shutdown — exit gracefully.
         }
 
         LogStopped(logger);
@@ -87,6 +93,16 @@ internal sealed partial class LegacyPublisher(
 
         _connection = await factory.CreateConnectionAsync(cancellationToken).ConfigureAwait(false);
         _channel = await _connection.CreateChannelAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+
+        // Declare the exchange so it exists before publishing — the legacy publisher
+        // uses a raw RabbitMQ connection independent of BareWire's topology deployment.
+        await _channel.ExchangeDeclareAsync(
+            exchange: ExchangeName,
+            type: ExchangeType.Fanout,
+            durable: true,
+            autoDelete: false,
+            arguments: null,
+            cancellationToken: cancellationToken).ConfigureAwait(false);
 
         LogConnected(logger);
 

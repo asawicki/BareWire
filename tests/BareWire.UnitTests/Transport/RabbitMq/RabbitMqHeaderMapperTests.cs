@@ -214,6 +214,45 @@ public sealed class RabbitMqHeaderMapperTests
         inbound.Should().NotContainKey("X-TenantId");
     }
 
+    // ── ReplyTo mapping ───────────────────────────────────────────────────────
+
+    [Fact]
+    public void MapInbound_WithReplyTo_IncludesReplyToHeader()
+    {
+        // Arrange
+        var props = Substitute.For<IReadOnlyBasicProperties>();
+        props.MessageId.Returns(string.Empty);
+        props.CorrelationId.Returns(string.Empty);
+        props.ContentType.Returns(string.Empty);
+        props.Type.Returns(string.Empty);
+        props.ReplyTo.Returns("amq.gen-test-queue");
+        props.Headers.Returns((IDictionary<string, object?>?)null);
+
+        var sut = CreateDefaultMapper();
+
+        // Act
+        Dictionary<string, string> result = sut.MapInbound(props);
+
+        // Assert
+        result.Should().ContainKey("ReplyTo");
+        result["ReplyTo"].Should().Be("amq.gen-test-queue");
+    }
+
+    [Fact]
+    public void MapInbound_WithoutReplyTo_DoesNotIncludeReplyToHeader()
+    {
+        // Arrange — ReplyTo is null/empty (default from CreateProperties)
+        IReadOnlyBasicProperties props = CreateProperties(messageId: "msg-001");
+
+        var sut = CreateDefaultMapper();
+
+        // Act
+        Dictionary<string, string> result = sut.MapInbound(props);
+
+        // Assert
+        result.Should().NotContainKey("ReplyTo");
+    }
+
     // ── Null guard ────────────────────────────────────────────────────────────
 
     [Fact]

@@ -7,6 +7,7 @@ namespace BareWire.Transport.RabbitMQ.Configuration;
 internal sealed class RabbitMqEndpointConfiguration : IReceiveEndpointConfigurator
 {
     private readonly List<Type> _consumerTypes = [];
+    private readonly List<ConsumerRegistration> _consumerRegistrations = [];
     private readonly List<Type> _rawConsumerTypes = [];
     private readonly List<Type> _sagaTypes = [];
 
@@ -19,6 +20,7 @@ internal sealed class RabbitMqEndpointConfiguration : IReceiveEndpointConfigurat
     internal string QueueName { get; }
 
     internal IReadOnlyList<Type> ConsumerTypes => _consumerTypes;
+    internal IReadOnlyList<ConsumerRegistration> ConsumerRegistrations => _consumerRegistrations;
     internal IReadOnlyList<Type> RawConsumerTypes => _rawConsumerTypes;
     internal IReadOnlyList<Type> SagaTypes => _sagaTypes;
 
@@ -43,6 +45,7 @@ internal sealed class RabbitMqEndpointConfiguration : IReceiveEndpointConfigurat
         where TMessage : class
     {
         _consumerTypes.Add(typeof(TConsumer));
+        _consumerRegistrations.Add(new ConsumerRegistration(typeof(TConsumer), typeof(TMessage)));
     }
 
     public void RawConsumer<T>() where T : class, IRawConsumer

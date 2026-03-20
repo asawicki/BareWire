@@ -298,6 +298,63 @@ public sealed class RabbitMqConfiguratorTests
         act.Should().Throw<ArgumentNullException>();
     }
 
+    // ── DefaultExchange ───────────────────────────────────────────────────────
+
+    [Fact]
+    public void Build_SetsDefaultExchange_WhenConfigured()
+    {
+        // Arrange
+        var configurator = new RabbitMqConfigurator();
+        configurator.Host("amqp://localhost:5672/");
+
+        // Act
+        configurator.DefaultExchange("my-exchange");
+        RabbitMqTransportOptions options = configurator.Build();
+
+        // Assert
+        options.DefaultExchange.Should().Be("my-exchange");
+    }
+
+    [Fact]
+    public void Build_DefaultExchangeIsEmpty_WhenNotConfigured()
+    {
+        // Arrange
+        var configurator = new RabbitMqConfigurator();
+        configurator.Host("amqp://localhost:5672/");
+
+        // Act
+        RabbitMqTransportOptions options = configurator.Build();
+
+        // Assert
+        options.DefaultExchange.Should().Be(string.Empty);
+    }
+
+    [Fact]
+    public void DefaultExchange_NullName_ThrowsArgumentException()
+    {
+        // Arrange
+        var configurator = new RabbitMqConfigurator();
+
+        // Act
+        Action act = () => configurator.DefaultExchange(null!);
+
+        // Assert
+        act.Should().Throw<ArgumentException>();
+    }
+
+    [Fact]
+    public void DefaultExchange_EmptyName_ThrowsArgumentException()
+    {
+        // Arrange
+        var configurator = new RabbitMqConfigurator();
+
+        // Act
+        Action act = () => configurator.DefaultExchange(string.Empty);
+
+        // Assert
+        act.Should().Throw<ArgumentException>();
+    }
+
     // ── Build_NoHost ──────────────────────────────────────────────────────────
 
     [Fact]

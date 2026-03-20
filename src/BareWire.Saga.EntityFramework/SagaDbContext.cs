@@ -8,7 +8,7 @@ namespace BareWire.Saga.EntityFramework;
 /// Abstraction for per-saga-type EF Core model configuration, registered via DI and
 /// applied in <see cref="SagaDbContext.OnModelCreating"/>.
 /// </summary>
-internal interface ISagaModelConfiguration
+public interface ISagaModelConfiguration
 {
     /// <summary>
     /// Returns the CLR type of the saga entity being configured.
@@ -81,10 +81,10 @@ public class SagaDbContext : DbContext
     /// <see cref="ServiceCollectionExtensions.AddBareWireSaga{TSaga}"/>.
     /// </param>
     /// <remarks>
-    /// The constructor is <c>internal</c> because <see cref="ISagaModelConfiguration"/> is an internal
-    /// interface. Instances are created exclusively by the DI container.
+    /// The constructor is <c>public</c> so that samples and host projects can resolve
+    /// <see cref="SagaDbContext"/> from the DI container. Instances are created exclusively by DI.
     /// </remarks>
-    internal SagaDbContext(
+    public SagaDbContext(
         DbContextOptions<SagaDbContext> options,
         IEnumerable<ISagaModelConfiguration> configurations)
         : base(options)

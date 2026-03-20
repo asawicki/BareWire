@@ -21,6 +21,7 @@ internal sealed partial class BareWireBus : IBus
     private readonly PublishFlowControlOptions _publishFlowControl;
     private readonly ILogger<BareWireBus> _logger;
     private readonly IBareWireInstrumentation _instrumentation;
+    private readonly IRequestClientFactory? _requestClientFactory;
 
     private readonly ConcurrentDictionary<Uri, ISendEndpoint> _sendEndpoints = new();
     private readonly Channel<OutboundMessage> _outgoingChannel;
@@ -37,7 +38,8 @@ internal sealed partial class BareWireBus : IBus
         FlowController flowController,
         PublishFlowControlOptions publishFlowControl,
         ILogger<BareWireBus> logger,
-        IBareWireInstrumentation instrumentation)
+        IBareWireInstrumentation instrumentation,
+        IRequestClientFactory? requestClientFactory = null)
     {
         _adapter = adapter ?? throw new ArgumentNullException(nameof(adapter));
         _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
@@ -46,6 +48,7 @@ internal sealed partial class BareWireBus : IBus
         _publishFlowControl = publishFlowControl ?? throw new ArgumentNullException(nameof(publishFlowControl));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _instrumentation = instrumentation ?? throw new ArgumentNullException(nameof(instrumentation));
+        _requestClientFactory = requestClientFactory;
 
         BusId = Guid.NewGuid();
         Address = new Uri($"barewire://{adapter.TransportName.ToLowerInvariant()}/bus/{BusId:N}");
@@ -151,8 +154,10 @@ internal sealed partial class BareWireBus : IBus
     // ── IBus ─────────────────────────────────────────────────────────────────
 
     public IRequestClient<T> CreateRequestClient<T>() where T : class
-        => throw new NotSupportedException(
-            "Request client requires a transport adapter that supports temporary response queues.");
+        => _requestClientFactory?.CreateRequestClient<T>()
+           ?? throw new NotSupportedException(
+               "Request client requires a transport adapter that supports temporary response queues. " +
+               "Register a transport that implements IRequestClientFactory (e.g. AddBareWireRabbitMq).");
 
     public IDisposable ConnectReceiveEndpoint(string queueName, Action<IReceiveEndpointConfigurator> configure)
         => throw new NotSupportedException("Dynamic receive endpoints are not yet supported.");
@@ -370,11 +375,33 @@ internal sealed partial class BareWireBus : IBus
             ArgumentNullException.ThrowIfNull(message);
 
             string routingKey = Address.AbsolutePath.TrimStart('/');
+            Dictionary<string, string>? headers = null;
+
+            // queue: scheme indicates direct-to-queue delivery via the AMQP default exchange ("").
+            if (Address.Scheme.Equals("queue", StringComparison.OrdinalIgnoreCase))
+            {
+                headers = new Dictionary<string, string> { ["BW-Exchange"] = "" };
+
+                // Extract correlation-id from query string if present.
+                string query = Address.Query;
+                if (query.StartsWith("?correlation-id=", StringComparison.OrdinalIgnoreCase))
+                {
+                    string value = query["?correlation-id=".Length..];
+
+                    // Handle possible additional query params (take value up to next &).
+                    int ampIdx = value.IndexOf('&');
+                    if (ampIdx >= 0)
+                        value = value[..ampIdx];
+
+                    headers["correlation-id"] = Uri.UnescapeDataString(value);
+                }
+            }
+
             OutboundMessage outbound = MessagePipeline.ProcessOutboundAsync(
                 message,
                 _serializer,
                 routingKey,
-                headers: null,
+                headers: headers,
                 cancellationToken);
 
             await _channelWriter.WriteAsync(outbound, cancellationToken).ConfigureAwait(false);

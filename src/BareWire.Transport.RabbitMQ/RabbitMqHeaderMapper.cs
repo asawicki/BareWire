@@ -69,6 +69,12 @@ internal sealed class RabbitMqHeaderMapper
             result[BwContentType] = properties.ContentType;
         }
 
+        // ReplyTo — response queue name for request-response pattern
+        if (!string.IsNullOrEmpty(properties.ReplyTo))
+        {
+            result["ReplyTo"] = properties.ReplyTo;
+        }
+
         // MessageType (Type property) — may be overridden by a custom header mapping
         string messageTypeSource = _config?.MessageTypeMapping ?? string.Empty;
         if (string.IsNullOrEmpty(messageTypeSource))

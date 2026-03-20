@@ -199,14 +199,18 @@ internal sealed partial class RabbitMqTransportAdapter : ITransportAdapter, IAsy
                 SingleReader = false,
             });
 
-        var consumer = new RabbitMqConsumer(consumerChannel, inboundChannel, _headerMapper);
+        // Each ConsumeAsync invocation gets a unique key so multiple consumers on the same
+        // endpoint (round-robin) do not overwrite each other's channel in the dictionary.
+        string consumerChannelId = Guid.NewGuid().ToString("N");
+        var consumer = new RabbitMqConsumer(consumerChannel, inboundChannel, _headerMapper, consumerChannelId);
 
-        // Register the channel so SettleAsync can resolve it by endpoint name.
-        _activeConsumerChannels[endpointName] = consumerChannel;
+        // Register the channel so SettleAsync can resolve it by consumer channel ID.
+        _activeConsumerChannels[consumerChannelId] = consumerChannel;
 
+        string assignedTag = string.Empty;
         try
         {
-            await consumerChannel.BasicConsumeAsync(
+            assignedTag = await consumerChannel.BasicConsumeAsync(
                 queue: endpointName,
                 autoAck: false,
                 consumerTag: string.Empty,
@@ -225,18 +229,23 @@ internal sealed partial class RabbitMqTransportAdapter : ITransportAdapter, IAsy
         }
         finally
         {
-            _activeConsumerChannels.TryRemove(endpointName, out _);
+            // Stop the broker from pushing new messages to this consumer, but keep the channel
+            // open so the caller can still settle (ACK/NACK) messages via SettleAsync.
+            // The channel is cleaned up when:
+            //   - The adapter is disposed (DisposeAsync closes all channels via the connection).
+            inboundChannel.Writer.TryComplete();
 
             try
             {
-                await consumerChannel.CloseAsync(cancellationToken).ConfigureAwait(false);
+                if (consumerChannel.IsOpen)
+                {
+                    await consumerChannel.BasicCancelAsync(assignedTag, noWait: false, cancellationToken: CancellationToken.None).ConfigureAwait(false);
+                }
             }
             catch (Exception ex)
             {
                 LogConsumeChannelCloseError(endpointName, ex);
             }
-
-            await consumerChannel.DisposeAsync().ConfigureAwait(false);
         }
     }
 
@@ -425,6 +434,14 @@ internal sealed partial class RabbitMqTransportAdapter : ITransportAdapter, IAsy
 
     private IChannel? ResolveChannelForMessage(InboundMessage message)
     {
+        // Primary path: look up by the unique consumer channel ID stamped on each message.
+        if (message.Headers.TryGetValue("BW-ConsumerChannelId", out string? channelId) &&
+            !string.IsNullOrEmpty(channelId) &&
+            _activeConsumerChannels.TryGetValue(channelId, out IChannel? channelById))
+        {
+            return channelById;
+        }
+
         // Fast path: exactly one active consumer — use its channel directly.
         if (_activeConsumerChannels.Count == 1)
         {
@@ -434,15 +451,7 @@ internal sealed partial class RabbitMqTransportAdapter : ITransportAdapter, IAsy
             }
         }
 
-        // Match by routing key header (set by RabbitMqConsumer as the queue name for direct routing).
-        if (message.Headers.TryGetValue("BW-RoutingKey", out string? routingKey) &&
-            !string.IsNullOrEmpty(routingKey) &&
-            _activeConsumerChannels.TryGetValue(routingKey, out IChannel? channelByKey))
-        {
-            return channelByKey;
-        }
-
-        // Fallback: return any open channel for multi-consumer scenarios.
+        // Fallback: return any open channel.
         foreach (IChannel ch in _activeConsumerChannels.Values)
         {
             if (ch.IsOpen)
@@ -474,6 +483,23 @@ internal sealed partial class RabbitMqTransportAdapter : ITransportAdapter, IAsy
         _disposed = true;
 
         await _disposeCts.CancelAsync().ConfigureAwait(false);
+
+        // Close consumer channels that were intentionally kept alive for post-iteration settlement.
+        foreach (KeyValuePair<string, IChannel> kvp in _activeConsumerChannels)
+        {
+            try
+            {
+                await kvp.Value.CloseAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                LogConsumeChannelCloseError(kvp.Key, ex);
+            }
+
+            await kvp.Value.DisposeAsync().ConfigureAwait(false);
+        }
+
+        _activeConsumerChannels.Clear();
 
         if (_connection is not null)
         {

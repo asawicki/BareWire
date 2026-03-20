@@ -54,6 +54,12 @@ internal sealed class RabbitMqTransportOptions
     /// </summary>
     public IReadOnlyList<RabbitMqEndpointConfiguration> EndpointConfigurations { get; set; } = [];
 
+    /// <summary>
+    /// The header mapping configurator produced by <see cref="IRabbitMqConfigurator.ConfigureHeaderMapping"/>.
+    /// <see langword="null"/> when no custom header mapping was configured.
+    /// </summary>
+    public RabbitMqHeaderMappingConfigurator? HeaderMappingConfigurator { get; set; }
+
     public void Validate()
     {
         if (string.IsNullOrEmpty(ConnectionString))

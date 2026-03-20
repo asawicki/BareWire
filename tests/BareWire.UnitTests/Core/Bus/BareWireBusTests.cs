@@ -190,6 +190,113 @@ public sealed class BareWireBusTests
         await bus.DisposeAsync();
     }
 
+    // ── SendAsync via queue: scheme ───────────────────────────────────────────
+
+    [Fact]
+    public async Task SendAsync_WithQueueSchemeUri_SetsBwExchangeToEmpty()
+    {
+        // Arrange — capture messages sent to the adapter.
+        var capturedBatches = new List<IReadOnlyList<OutboundMessage>>();
+        var (bus, adapter, _) = CreateBus();
+        adapter.SendBatchAsync(
+                Arg.Any<IReadOnlyList<OutboundMessage>>(),
+                Arg.Any<CancellationToken>())
+               .Returns(callInfo =>
+               {
+                   capturedBatches.Add(callInfo.ArgAt<IReadOnlyList<OutboundMessage>>(0));
+                   var messages = callInfo.ArgAt<IReadOnlyList<OutboundMessage>>(0);
+                   return Task.FromResult<IReadOnlyList<SendResult>>(
+                       messages.Select(static _ => new SendResult(true, 0UL)).ToList());
+               });
+        bus.StartPublishing();
+
+        Uri queueUri = new("queue://localhost/amq.gen-reply-queue");
+        ISendEndpoint endpoint = await bus.GetSendEndpoint(queueUri, CancellationToken.None);
+
+        // Act
+        await endpoint.SendAsync(new BusTestMessage("response"), CancellationToken.None);
+
+        // Give the background publisher time to flush.
+        await Task.Delay(50);
+
+        // Assert — the outbound message must carry BW-Exchange="" to trigger default-exchange delivery.
+        capturedBatches.Should().HaveCount(1);
+        OutboundMessage sent = capturedBatches[0][0];
+        sent.Headers.Should().ContainKey("BW-Exchange");
+        sent.Headers["BW-Exchange"].Should().BeEmpty();
+
+        await bus.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task SendAsync_WithQueueSchemeUriAndCorrelationId_ExtractsCorrelationIdFromQuery()
+    {
+        // Arrange
+        var capturedBatches = new List<IReadOnlyList<OutboundMessage>>();
+        var (bus, adapter, _) = CreateBus();
+        adapter.SendBatchAsync(
+                Arg.Any<IReadOnlyList<OutboundMessage>>(),
+                Arg.Any<CancellationToken>())
+               .Returns(callInfo =>
+               {
+                   capturedBatches.Add(callInfo.ArgAt<IReadOnlyList<OutboundMessage>>(0));
+                   var messages = callInfo.ArgAt<IReadOnlyList<OutboundMessage>>(0);
+                   return Task.FromResult<IReadOnlyList<SendResult>>(
+                       messages.Select(static _ => new SendResult(true, 0UL)).ToList());
+               });
+        bus.StartPublishing();
+
+        string corrId = "f47ac10b-58cc-4372-a567-0e02b2c3d479";
+        Uri queueUri = new($"queue://localhost/reply-queue?correlation-id={Uri.EscapeDataString(corrId)}");
+        ISendEndpoint endpoint = await bus.GetSendEndpoint(queueUri, CancellationToken.None);
+
+        // Act
+        await endpoint.SendAsync(new BusTestMessage("response"), CancellationToken.None);
+        await Task.Delay(50);
+
+        // Assert — correlation-id must be present in the outbound headers.
+        capturedBatches.Should().HaveCount(1);
+        OutboundMessage sent = capturedBatches[0][0];
+        sent.Headers.Should().ContainKey("correlation-id");
+        sent.Headers["correlation-id"].Should().Be(corrId);
+        sent.Headers["BW-Exchange"].Should().BeEmpty();
+
+        await bus.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task SendAsync_WithNonQueueSchemeUri_DoesNotSetBwExchange()
+    {
+        // Arrange
+        var capturedBatches = new List<IReadOnlyList<OutboundMessage>>();
+        var (bus, adapter, _) = CreateBus();
+        adapter.SendBatchAsync(
+                Arg.Any<IReadOnlyList<OutboundMessage>>(),
+                Arg.Any<CancellationToken>())
+               .Returns(callInfo =>
+               {
+                   capturedBatches.Add(callInfo.ArgAt<IReadOnlyList<OutboundMessage>>(0));
+                   var messages = callInfo.ArgAt<IReadOnlyList<OutboundMessage>>(0);
+                   return Task.FromResult<IReadOnlyList<SendResult>>(
+                       messages.Select(static _ => new SendResult(true, 0UL)).ToList());
+               });
+        bus.StartPublishing();
+
+        Uri regularUri = new("rabbitmq://localhost/some-queue");
+        ISendEndpoint endpoint = await bus.GetSendEndpoint(regularUri, CancellationToken.None);
+
+        // Act
+        await endpoint.SendAsync(new BusTestMessage("direct"), CancellationToken.None);
+        await Task.Delay(50);
+
+        // Assert — BW-Exchange header must not be present for a non-queue: URI.
+        capturedBatches.Should().HaveCount(1);
+        OutboundMessage sent = capturedBatches[0][0];
+        sent.Headers.Should().NotContainKey("BW-Exchange");
+
+        await bus.DisposeAsync();
+    }
+
     // ── DisposeAsync ──────────────────────────────────────────────────────────
 
     [Fact]

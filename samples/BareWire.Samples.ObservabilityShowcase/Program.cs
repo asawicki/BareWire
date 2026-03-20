@@ -27,9 +27,12 @@
 //   When running via Aspire AppHost, both are provisioned automatically.
 
 using BareWire.Abstractions;
+using BareWire.Abstractions.Configuration;
 using BareWire.Core;
+using BareWire.Transport.RabbitMQ;
 using BareWire.Observability;
 using BareWire.Outbox.EntityFramework;
+using BareWire.Saga;
 using BareWire.Saga.EntityFramework;
 using BareWire.Samples.ObservabilityShowcase.Consumers;
 using BareWire.Samples.ObservabilityShowcase.Data;
@@ -38,6 +41,8 @@ using BareWire.Samples.ObservabilityShowcase.Saga;
 using BareWire.Samples.ServiceDefaults;
 using BareWire.Serialization.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Storage;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
@@ -90,74 +95,78 @@ builder.Services.AddTransient<DemoOrderConsumer>();
 builder.Services.AddTransient<DemoPaymentConsumer>();
 builder.Services.AddTransient<DemoShipmentConsumer>();
 
+Action<IRabbitMqConfigurator> configureRabbitMq = rmq =>
+{
+    rmq.Host(rabbitMqConnectionString);
+    rmq.DefaultExchange("demo.events");
+
+    // ADR-002: Manual topology — declare all exchanges, queues, and bindings explicitly.
+    // Topic exchange routes messages by routing key pattern to the appropriate queues.
+    rmq.ConfigureTopology(t =>
+    {
+        // Single topic exchange for all demo events.
+        t.DeclareExchange("demo.events", ExchangeType.Topic, durable: true);
+
+        // Queue for order events — receives messages with routing key matching "order.*".
+        t.DeclareQueue("demo-orders", durable: true);
+        t.BindExchangeToQueue("demo.events", "demo-orders", routingKey: "order.*");
+
+        // Queue for payment events — receives messages with routing key matching "payment.*".
+        t.DeclareQueue("demo-payments", durable: true);
+        t.BindExchangeToQueue("demo.events", "demo-payments", routingKey: "payment.*");
+
+        // Queue for shipment events — receives messages with routing key matching "shipment.*".
+        t.DeclareQueue("demo-shipments", durable: true);
+        t.BindExchangeToQueue("demo.events", "demo-shipments", routingKey: "shipment.*");
+
+        // Queue for the saga — receives all events via catch-all "#" routing key.
+        t.DeclareQueue("demo-saga", durable: true);
+        t.BindExchangeToQueue("demo.events", "demo-saga", routingKey: "#");
+    });
+
+    // Endpoint: DemoOrderConsumer processes DemoOrderCreated and publishes DemoPaymentProcessed.
+    rmq.ReceiveEndpoint("demo-orders", e =>
+    {
+        e.PrefetchCount = 16;
+        e.ConcurrentMessageLimit = 8;
+        e.RetryCount = 3;
+        e.RetryInterval = TimeSpan.FromSeconds(1);
+        e.Consumer<DemoOrderConsumer, DemoOrderCreated>();
+    });
+
+    // Endpoint: DemoPaymentConsumer processes DemoPaymentProcessed and publishes DemoShipmentDispatched.
+    rmq.ReceiveEndpoint("demo-payments", e =>
+    {
+        e.PrefetchCount = 16;
+        e.ConcurrentMessageLimit = 8;
+        e.RetryCount = 3;
+        e.RetryInterval = TimeSpan.FromSeconds(1);
+        e.Consumer<DemoPaymentConsumer, DemoPaymentProcessed>();
+    });
+
+    // Endpoint: DemoShipmentConsumer logs pipeline completion.
+    rmq.ReceiveEndpoint("demo-shipments", e =>
+    {
+        e.PrefetchCount = 16;
+        e.ConcurrentMessageLimit = 8;
+        e.RetryCount = 3;
+        e.RetryInterval = TimeSpan.FromSeconds(1);
+        e.Consumer<DemoShipmentConsumer, DemoShipmentDispatched>();
+    });
+
+    // Endpoint: DemoSagaStateMachine correlates DemoOrderCreated and DemoPaymentProcessed.
+    rmq.ReceiveEndpoint("demo-saga", e =>
+    {
+        e.PrefetchCount = 8;
+        e.ConcurrentMessageLimit = 4;
+        e.StateMachineSaga<DemoSagaStateMachine>();
+    });
+};
+
+builder.Services.AddBareWireRabbitMq(configureRabbitMq);
 builder.Services.AddBareWire(cfg =>
 {
-    cfg.UseRabbitMQ(rmq =>
-    {
-        rmq.Host(rabbitMqConnectionString);
-
-        // ADR-002: Manual topology — declare all exchanges, queues, and bindings explicitly.
-        // Topic exchange routes messages by routing key pattern to the appropriate queues.
-        rmq.ConfigureTopology(t =>
-        {
-            // Single topic exchange for all demo events.
-            t.DeclareExchange("demo.events", ExchangeType.Topic, durable: true);
-
-            // Queue for order events — receives messages with routing key matching "order.*".
-            t.DeclareQueue("demo-orders", durable: true);
-            t.BindExchangeToQueue("demo.events", "demo-orders", routingKey: "order.*");
-
-            // Queue for payment events — receives messages with routing key matching "payment.*".
-            t.DeclareQueue("demo-payments", durable: true);
-            t.BindExchangeToQueue("demo.events", "demo-payments", routingKey: "payment.*");
-
-            // Queue for shipment events — receives messages with routing key matching "shipment.*".
-            t.DeclareQueue("demo-shipments", durable: true);
-            t.BindExchangeToQueue("demo.events", "demo-shipments", routingKey: "shipment.*");
-
-            // Queue for the saga — receives all events via catch-all "#" routing key.
-            t.DeclareQueue("demo-saga", durable: true);
-            t.BindExchangeToQueue("demo.events", "demo-saga", routingKey: "#");
-        });
-
-        // Endpoint: DemoOrderConsumer processes DemoOrderCreated and publishes DemoPaymentProcessed.
-        rmq.ReceiveEndpoint("demo-orders", e =>
-        {
-            e.PrefetchCount = 16;
-            e.ConcurrentMessageLimit = 8;
-            e.RetryCount = 3;
-            e.RetryInterval = TimeSpan.FromSeconds(1);
-            e.Consumer<DemoOrderConsumer, DemoOrderCreated>();
-        });
-
-        // Endpoint: DemoPaymentConsumer processes DemoPaymentProcessed and publishes DemoShipmentDispatched.
-        rmq.ReceiveEndpoint("demo-payments", e =>
-        {
-            e.PrefetchCount = 16;
-            e.ConcurrentMessageLimit = 8;
-            e.RetryCount = 3;
-            e.RetryInterval = TimeSpan.FromSeconds(1);
-            e.Consumer<DemoPaymentConsumer, DemoPaymentProcessed>();
-        });
-
-        // Endpoint: DemoShipmentConsumer logs pipeline completion.
-        rmq.ReceiveEndpoint("demo-shipments", e =>
-        {
-            e.PrefetchCount = 16;
-            e.ConcurrentMessageLimit = 8;
-            e.RetryCount = 3;
-            e.RetryInterval = TimeSpan.FromSeconds(1);
-            e.Consumer<DemoShipmentConsumer, DemoShipmentDispatched>();
-        });
-
-        // Endpoint: DemoSagaStateMachine correlates DemoOrderCreated and DemoPaymentProcessed.
-        rmq.ReceiveEndpoint("demo-saga", e =>
-        {
-            e.PrefetchCount = 8;
-            e.ConcurrentMessageLimit = 4;
-            e.StateMachineSaga<DemoSagaStateMachine>();
-        });
-    });
+    cfg.UseRabbitMQ(configureRabbitMq);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -169,8 +178,8 @@ builder.Services.AddBareWire(cfg =>
 builder.Services.AddBareWireSaga<DemoSagaState>(
     options => options.UseNpgsql(dbConnectionString));
 
-// Register the state machine so the runtime can resolve it from DI.
-builder.Services.AddSingleton<DemoSagaStateMachine>();
+// Register the state machine and wire its message dispatcher into the consume pipeline.
+builder.Services.AddBareWireSagaStateMachine<DemoSagaStateMachine, DemoSagaState>();
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 7. Transactional outbox / inbox (EF Core + PostgreSQL)
@@ -187,32 +196,38 @@ builder.Services.AddBareWireOutbox(
     });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 8. BareWire observability — OpenTelemetry (traces + metrics) + health checks
-// ─────────────────────────────────────────────────────────────────────────────
-
-// AddBareWireObservability activates BareWireInstrumentation (replaces NullInstrumentation)
-// and registers BareWireHealthCheck on the standard health check pipeline.
-// Traces and metrics are exported via OpenTelemetry OTLP — set OTEL_EXPORTER_OTLP_ENDPOINT
-// or use Aspire Dashboard for zero-config local observability.
-builder.Services.AddBareWireObservability(cfg =>
-{
-    cfg.EnableOpenTelemetry = true;
-});
-
-// Expose /health, /health/live, /health/ready endpoints.
-builder.Services.AddHealthChecks();
-
-// ─────────────────────────────────────────────────────────────────────────────
 // 9. Build the application
 // ─────────────────────────────────────────────────────────────────────────────
 
 WebApplication app = builder.Build();
 
 // Development only — use migrations in production.
+// EnsureCreatedAsync is a no-op when the database already exists (e.g. created by another sample
+// sharing the same connection string). CreateTablesAsync adds missing tables for this DbContext.
 using (IServiceScope scope = app.Services.CreateScope())
 {
     ShowcaseDbContext db = scope.ServiceProvider.GetRequiredService<ShowcaseDbContext>();
     await db.Database.EnsureCreatedAsync().ConfigureAwait(false);
+    try
+    {
+        var creator = db.Database.GetInfrastructure().GetRequiredService<IRelationalDatabaseCreator>();
+        await creator.CreateTablesAsync().ConfigureAwait(false);
+    }
+    catch (Npgsql.PostgresException)
+    {
+        // Tables already exist from a previous run — safe to ignore in development.
+    }
+
+    OutboxDbContext outboxDb = scope.ServiceProvider.GetRequiredService<OutboxDbContext>();
+    try
+    {
+        var outboxCreator = outboxDb.Database.GetInfrastructure().GetRequiredService<IRelationalDatabaseCreator>();
+        await outboxCreator.CreateTablesAsync().ConfigureAwait(false);
+    }
+    catch (Npgsql.PostgresException)
+    {
+        // Tables already exist from a previous run — safe to ignore in development.
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -221,9 +236,6 @@ using (IServiceScope scope = app.Services.CreateScope())
 
 // Health check endpoints: /health, /health/live, /health/ready.
 app.MapServiceDefaults();
-
-// Health check endpoint — reflects BareWire bus health + system health.
-app.MapHealthChecks("/health");
 
 // POST /demo/run — publishes DemoOrderCreated to trigger the full observability pipeline.
 // The complete 3-hop distributed trace (order → payment → shipment) is visible in

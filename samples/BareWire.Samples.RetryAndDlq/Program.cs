@@ -38,13 +38,17 @@
 //   When running via Aspire AppHost, both are provisioned automatically.
 
 using BareWire.Abstractions;
+using BareWire.Abstractions.Configuration;
 using BareWire.Core;
+using BareWire.Transport.RabbitMQ;
 using BareWire.Samples.RetryAndDlq.Consumers;
 using BareWire.Samples.RetryAndDlq.Data;
 using BareWire.Samples.RetryAndDlq.Messages;
 using BareWire.Samples.ServiceDefaults;
 using BareWire.Serialization.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Storage;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
@@ -84,56 +88,60 @@ builder.Services.AddBareWireJsonSerializer();
 builder.Services.AddTransient<PaymentProcessor>();
 builder.Services.AddTransient<DlqConsumer>();
 
+Action<IRabbitMqConfigurator> configureRabbitMq = rmq =>
+{
+    // Connection to the RabbitMQ broker.
+    rmq.Host(rabbitMqConnectionString);
+    rmq.DefaultExchange("payments");
+
+    // ADR-002: Manual topology — declare all exchanges, queues, and bindings explicitly.
+    // The broker resources are deployed by IBusControl.DeployTopologyAsync on startup.
+    rmq.ConfigureTopology(t =>
+    {
+        // Direct exchange for payment commands.
+        // Messages published via IPublishEndpoint are routed here.
+        t.DeclareExchange("payments", ExchangeType.Direct, durable: true);
+
+        // Main processing queue.
+        // NOTE: For full DLX behaviour this queue must be provisioned with:
+        //   x-dead-letter-exchange = "payments.dlx"
+        // Use RabbitMQ Management UI, rabbitmqadmin, or the Aspire provisioning
+        // script — see the file header for details. BareWire will declare the queue
+        // without arguments here; if it was pre-created with arguments it will match
+        // the existing declaration and no error is raised (idempotent).
+        t.DeclareQueue("payments", durable: true);
+        t.BindExchangeToQueue("payments", "payments", routingKey: "");
+
+        // Fanout DLX exchange — all dead-lettered payments fan out to "payments-dlq".
+        t.DeclareExchange("payments.dlx", ExchangeType.Fanout, durable: true);
+
+        // Dead-letter queue — receives messages from "payments.dlx" after retry exhaustion.
+        t.DeclareQueue("payments-dlq", durable: true);
+        t.BindExchangeToQueue("payments.dlx", "payments-dlq", routingKey: "");
+    });
+
+    // Endpoint: PaymentProcessor with retry policy.
+    // After 3 failed attempts the broker native DLX mechanism routes the message
+    // from "payments" to "payments.dlx" → "payments-dlq".
+    rmq.ReceiveEndpoint("payments", e =>
+    {
+        e.RetryCount = 3;
+        e.RetryInterval = TimeSpan.FromSeconds(1);
+        e.Consumer<PaymentProcessor, ProcessPayment>();
+    });
+
+    // Endpoint: DlqConsumer subscribes to the dead-letter queue.
+    // No retry on DLQ — a failed payment is logged and persisted as-is.
+    rmq.ReceiveEndpoint("payments-dlq", e =>
+    {
+        e.Consumer<DlqConsumer, ProcessPayment>();
+    });
+};
+
+builder.Services.AddBareWireRabbitMq(configureRabbitMq);
 builder.Services.AddBareWire(cfg =>
 {
-    cfg.UseRabbitMQ(rmq =>
-    {
-        // Connection to the RabbitMQ broker.
-        rmq.Host(rabbitMqConnectionString);
-
-        // ADR-002: Manual topology — declare all exchanges, queues, and bindings explicitly.
-        // The broker resources are deployed by IBusControl.DeployTopologyAsync on startup.
-        rmq.ConfigureTopology(t =>
-        {
-            // Direct exchange for payment commands.
-            // Messages published via IPublishEndpoint are routed here.
-            t.DeclareExchange("payments", ExchangeType.Direct, durable: true);
-
-            // Main processing queue.
-            // NOTE: For full DLX behaviour this queue must be provisioned with:
-            //   x-dead-letter-exchange = "payments.dlx"
-            // Use RabbitMQ Management UI, rabbitmqadmin, or the Aspire provisioning
-            // script — see the file header for details. BareWire will declare the queue
-            // without arguments here; if it was pre-created with arguments it will match
-            // the existing declaration and no error is raised (idempotent).
-            t.DeclareQueue("payments", durable: true);
-            t.BindExchangeToQueue("payments", "payments", routingKey: "");
-
-            // Fanout DLX exchange — all dead-lettered payments fan out to "payments-dlq".
-            t.DeclareExchange("payments.dlx", ExchangeType.Fanout, durable: true);
-
-            // Dead-letter queue — receives messages from "payments.dlx" after retry exhaustion.
-            t.DeclareQueue("payments-dlq", durable: true);
-            t.BindExchangeToQueue("payments.dlx", "payments-dlq", routingKey: "");
-        });
-
-        // Endpoint: PaymentProcessor with retry policy.
-        // After 3 failed attempts the broker native DLX mechanism routes the message
-        // from "payments" to "payments.dlx" → "payments-dlq".
-        rmq.ReceiveEndpoint("payments", e =>
-        {
-            e.RetryCount = 3;
-            e.RetryInterval = TimeSpan.FromSeconds(1);
-            e.Consumer<PaymentProcessor, ProcessPayment>();
-        });
-
-        // Endpoint: DlqConsumer subscribes to the dead-letter queue.
-        // No retry on DLQ — a failed payment is logged and persisted as-is.
-        rmq.ReceiveEndpoint("payments-dlq", e =>
-        {
-            e.Consumer<DlqConsumer, ProcessPayment>();
-        });
-    });
+    cfg.UseRabbitMQ(configureRabbitMq);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -143,10 +151,21 @@ builder.Services.AddBareWire(cfg =>
 WebApplication app = builder.Build();
 
 // Development only — use migrations in production.
+// EnsureCreatedAsync is a no-op when the database already exists (e.g. created by another sample
+// sharing the same connection string). CreateTablesAsync adds missing tables for this DbContext.
 using (IServiceScope scope = app.Services.CreateScope())
 {
     PaymentDbContext db = scope.ServiceProvider.GetRequiredService<PaymentDbContext>();
     await db.Database.EnsureCreatedAsync().ConfigureAwait(false);
+    try
+    {
+        var creator = db.Database.GetInfrastructure().GetRequiredService<IRelationalDatabaseCreator>();
+        await creator.CreateTablesAsync().ConfigureAwait(false);
+    }
+    catch (Npgsql.PostgresException)
+    {
+        // Tables already exist from a previous run — safe to ignore in development.
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

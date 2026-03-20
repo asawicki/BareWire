@@ -103,7 +103,13 @@ public sealed class BareWireTestHarness : IAsyncDisposable
             adapter: adapter,
             flowController: flowController,
             configurator: configurator,
-            logger: loggerFactory.CreateLogger<BareWireBusControl>());
+            logger: loggerFactory.CreateLogger<BareWireBusControl>(),
+            topology: null,
+            endpointBindings: [],
+            deserializer: deserializer,
+            scopeFactory: new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+            instrumentation: new NullInstrumentation(),
+            loggerFactory: loggerFactory);
 
         await busControl.StartAsync(cancellationToken).ConfigureAwait(false);
 

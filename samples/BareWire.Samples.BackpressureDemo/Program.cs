@@ -28,7 +28,9 @@
 //   When running via Aspire AppHost, the broker is provisioned automatically.
 
 using BareWire.Abstractions;
+using BareWire.Abstractions.Configuration;
 using BareWire.Core;
+using BareWire.Transport.RabbitMQ;
 using BareWire.Observability;
 using BareWire.Samples.BackpressureDemo.Consumers;
 using BareWire.Samples.BackpressureDemo.Messages;
@@ -87,35 +89,39 @@ builder.Services.AddBareWireJsonSerializer();
 // Register the consumer in DI (resolved per-message by ConsumerDispatcher).
 builder.Services.AddTransient<SlowConsumer>();
 
+Action<IRabbitMqConfigurator> configureRabbitMq = rmq =>
+{
+    // Connection to the RabbitMQ broker.
+    rmq.Host(rabbitMqConnectionString);
+    rmq.DefaultExchange("loadtest");
+
+    // ADR-002: Manual topology — declare all exchanges, queues, and bindings explicitly.
+    // The broker resources are deployed by IBusControl.DeployTopologyAsync on startup.
+    rmq.ConfigureTopology(t =>
+    {
+        // Fanout exchange — every LoadTestMessage published is delivered to
+        // the "loadtest-processing" queue.
+        t.DeclareExchange("loadtest", ExchangeType.Fanout, durable: true);
+
+        t.DeclareQueue("loadtest-processing", durable: true);
+        t.BindExchangeToQueue("loadtest", "loadtest-processing", routingKey: "#");
+    });
+
+    // Endpoint: SlowConsumer processes LoadTestMessage with artificial 100 ms latency.
+    // Low prefetch and concurrent limits deliberately saturate the consumer so that
+    // ADR-004 and ADR-006 back-pressure mechanisms become visible.
+    rmq.ReceiveEndpoint("loadtest-processing", e =>
+    {
+        e.PrefetchCount = 16;
+        e.ConcurrentMessageLimit = 8;
+        e.Consumer<SlowConsumer, LoadTestMessage>();
+    });
+};
+
+builder.Services.AddBareWireRabbitMq(configureRabbitMq);
 builder.Services.AddBareWire(cfg =>
 {
-    cfg.UseRabbitMQ(rmq =>
-    {
-        // Connection to the RabbitMQ broker.
-        rmq.Host(rabbitMqConnectionString);
-
-        // ADR-002: Manual topology — declare all exchanges, queues, and bindings explicitly.
-        // The broker resources are deployed by IBusControl.DeployTopologyAsync on startup.
-        rmq.ConfigureTopology(t =>
-        {
-            // Fanout exchange — every LoadTestMessage published is delivered to
-            // the "loadtest-processing" queue.
-            t.DeclareExchange("loadtest", ExchangeType.Fanout, durable: true);
-
-            t.DeclareQueue("loadtest-processing", durable: true);
-            t.BindExchangeToQueue("loadtest", "loadtest-processing", routingKey: "#");
-        });
-
-        // Endpoint: SlowConsumer processes LoadTestMessage with artificial 100 ms latency.
-        // Low prefetch and concurrent limits deliberately saturate the consumer so that
-        // ADR-004 and ADR-006 back-pressure mechanisms become visible.
-        rmq.ReceiveEndpoint("loadtest-processing", e =>
-        {
-            e.PrefetchCount = 16;
-            e.ConcurrentMessageLimit = 8;
-            e.Consumer<SlowConsumer, LoadTestMessage>();
-        });
-    });
+    cfg.UseRabbitMQ(configureRabbitMq);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -129,21 +135,7 @@ builder.Services.AddSingleton<LoadGenerator>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<LoadGenerator>());
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 7. Observability — OpenTelemetry (traces + metrics) + health checks
-// ─────────────────────────────────────────────────────────────────────────────
-
-// AddBareWireObservability replaces NullInstrumentation with BareWireInstrumentation
-// and registers BareWireHealthCheck on the standard health check pipeline.
-// Health reports Degraded when in-flight messages exceed 90% of MaxInFlightMessages.
-builder.Services.AddBareWireObservability(cfg =>
-{
-    cfg.EnableOpenTelemetry = true;
-});
-
-builder.Services.AddHealthChecks();
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 8. Build the application
+// 7. Build the application
 // ─────────────────────────────────────────────────────────────────────────────
 
 WebApplication app = builder.Build();

@@ -38,10 +38,10 @@ public class OutboxDbContext : DbContext
     /// </summary>
     /// <param name="options">The EF Core options configured for this context.</param>
     /// <remarks>
-    /// The constructor is <c>internal</c> because instances are created exclusively
-    /// by the DI container via <see cref="ServiceCollectionExtensions.AddBareWireOutbox"/>.
+    /// The constructor is <c>public</c> because <c>AddDbContext</c> requires a public
+    /// constructor, and EF Core migration tooling also needs to instantiate the context.
     /// </remarks>
-    internal OutboxDbContext(DbContextOptions<OutboxDbContext> options)
+    public OutboxDbContext(DbContextOptions<OutboxDbContext> options)
         : base(options)
     {
     }

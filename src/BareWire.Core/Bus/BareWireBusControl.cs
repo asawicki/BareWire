@@ -1,9 +1,12 @@
 using BareWire.Abstractions;
 using BareWire.Abstractions.Configuration;
+using BareWire.Abstractions.Saga;
+using BareWire.Abstractions.Serialization;
 using BareWire.Abstractions.Topology;
 using BareWire.Abstractions.Transport;
 using BareWire.Core.Configuration;
 using BareWire.Core.FlowControl;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace BareWire.Core.Bus;
@@ -15,8 +18,16 @@ internal sealed partial class BareWireBusControl : IBusControl
     private readonly FlowController _flowController;
     private readonly BusConfigurator _configurator;
     private readonly ILogger<BareWireBusControl> _logger;
+    private readonly TopologyDeclaration? _topology;
+    private readonly IReadOnlyList<EndpointBinding> _endpointBindings;
+    private readonly IMessageDeserializer _deserializer;
+    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly Abstractions.Observability.IBareWireInstrumentation _instrumentation;
+    private readonly ILoggerFactory _loggerFactory;
 
     private readonly object _stateLock = new();
+    private readonly List<Task> _consumeTasks = [];
+    private CancellationTokenSource? _consumeCts;
     private bool _started;
 
     internal BareWireBusControl(
@@ -24,13 +35,25 @@ internal sealed partial class BareWireBusControl : IBusControl
         ITransportAdapter adapter,
         FlowController flowController,
         BusConfigurator configurator,
-        ILogger<BareWireBusControl> logger)
+        ILogger<BareWireBusControl> logger,
+        TopologyDeclaration? topology,
+        IReadOnlyList<EndpointBinding> endpointBindings,
+        IMessageDeserializer deserializer,
+        IServiceScopeFactory scopeFactory,
+        Abstractions.Observability.IBareWireInstrumentation instrumentation,
+        ILoggerFactory loggerFactory)
     {
         _bus = bus ?? throw new ArgumentNullException(nameof(bus));
         _adapter = adapter ?? throw new ArgumentNullException(nameof(adapter));
         _flowController = flowController ?? throw new ArgumentNullException(nameof(flowController));
         _configurator = configurator ?? throw new ArgumentNullException(nameof(configurator));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _topology = topology;
+        _endpointBindings = endpointBindings ?? [];
+        _deserializer = deserializer ?? throw new ArgumentNullException(nameof(deserializer));
+        _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
+        _instrumentation = instrumentation ?? throw new ArgumentNullException(nameof(instrumentation));
+        _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
     }
 
     // ── IBusControl ───────────────────────────────────────────────────────────
@@ -50,7 +73,50 @@ internal sealed partial class BareWireBusControl : IBusControl
 
         LogBusStarting(_logger, _bus.BusId);
 
+        // Deploy topology (exchanges, queues, bindings) to the broker.
+        if (_topology is not null)
+        {
+            await _adapter.DeployTopologyAsync(_topology, cancellationToken).ConfigureAwait(false);
+            LogTopologyDeployed(_logger, _topology.Exchanges.Count, _topology.Queues.Count);
+        }
+
+        // Start the publish loop.
         _bus.StartPublishing();
+
+        // Start a consume loop for each configured receive endpoint.
+        _consumeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        CancellationToken consumeToken = _consumeCts.Token;
+
+        // Resolve all registered saga message dispatchers once — shared across all endpoints.
+        // Each endpoint's ReceiveEndpointRunner filters to only the dispatchers relevant to it.
+        // Use GetService<IEnumerable<T>>() so that an empty list is returned when no dispatchers
+        // are registered, without throwing InvalidOperationException.
+        using IServiceScope dispatcherScope = _scopeFactory.CreateScope();
+        IReadOnlyList<ISagaMessageDispatcher> sagaDispatchers =
+            [.. dispatcherScope.ServiceProvider
+                .GetService<IEnumerable<ISagaMessageDispatcher>>() ?? []];
+
+        foreach (EndpointBinding binding in _endpointBindings)
+        {
+            if (binding.Consumers.Count == 0
+                && binding.RawConsumers.Count == 0
+                && binding.SagaTypes.Count == 0)
+                continue;
+
+            var runner = new ReceiveEndpointRunner(
+                binding,
+                _adapter,
+                _deserializer,
+                _bus, // IPublishEndpoint
+                _bus, // ISendEndpointProvider
+                _scopeFactory,
+                _flowController,
+                _instrumentation,
+                _loggerFactory.CreateLogger<ReceiveEndpointRunner>(),
+                sagaDispatchers);
+
+            _consumeTasks.Add(Task.Run(() => runner.RunAsync(consumeToken), CancellationToken.None));
+        }
 
         LogBusStarted(_logger, _bus.BusId);
 
@@ -69,6 +135,29 @@ internal sealed partial class BareWireBusControl : IBusControl
 
         LogBusStopping(_logger, _bus.BusId);
 
+        // Cancel consume loops.
+        if (_consumeCts is not null)
+        {
+            await _consumeCts.CancelAsync().ConfigureAwait(false);
+
+            try
+            {
+                await Task.WhenAll(_consumeTasks).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected during graceful shutdown.
+            }
+            catch (Exception ex)
+            {
+                LogConsumeShutdownError(_logger, ex);
+            }
+
+            _consumeCts.Dispose();
+            _consumeCts = null;
+            _consumeTasks.Clear();
+        }
+
         await _bus.DisposeAsync().ConfigureAwait(false);
 
         LogBusStopped(_logger, _bus.BusId);
@@ -76,9 +165,8 @@ internal sealed partial class BareWireBusControl : IBusControl
 
     public async Task DeployTopologyAsync(CancellationToken cancellationToken = default)
     {
-        // Deploy an empty topology by default. Full topology wiring is added in Phase 3 (RabbitMQ transport).
-        TopologyDeclaration emptyTopology = new();
-        await _adapter.DeployTopologyAsync(emptyTopology, cancellationToken).ConfigureAwait(false);
+        TopologyDeclaration topology = _topology ?? new TopologyDeclaration();
+        await _adapter.DeployTopologyAsync(topology, cancellationToken).ConfigureAwait(false);
     }
 
     public BusHealthStatus CheckHealth()
@@ -142,9 +230,16 @@ internal sealed partial class BareWireBusControl : IBusControl
     [LoggerMessage(Level = LogLevel.Information, Message = "BareWire bus {BusId} started.")]
     private static partial void LogBusStarted(ILogger logger, Guid busId);
 
+    [LoggerMessage(Level = LogLevel.Information,
+        Message = "Topology deployed: {ExchangeCount} exchange(s), {QueueCount} queue(s).")]
+    private static partial void LogTopologyDeployed(ILogger logger, int exchangeCount, int queueCount);
+
     [LoggerMessage(Level = LogLevel.Information, Message = "BareWire bus {BusId} stopping.")]
     private static partial void LogBusStopping(ILogger logger, Guid busId);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "BareWire bus {BusId} stopped.")]
     private static partial void LogBusStopped(ILogger logger, Guid busId);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Error during consume loop shutdown.")]
+    private static partial void LogConsumeShutdownError(ILogger logger, Exception ex);
 }

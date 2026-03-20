@@ -8,6 +8,7 @@ namespace BareWire.Transport.RabbitMQ.Configuration;
 internal sealed class RabbitMqConfigurator : IRabbitMqConfigurator
 {
     private string? _hostUri;
+    private string? _defaultExchange;
     private RabbitMqHostConfigurator? _hostConfigurator;
     private RabbitMqTopologyConfigurator? _topologyConfigurator;
     private RabbitMqHeaderMappingConfigurator? _headerMappingConfigurator;
@@ -21,6 +22,12 @@ internal sealed class RabbitMqConfigurator : IRabbitMqConfigurator
         _hostConfigurator = new RabbitMqHostConfigurator();
 
         configure?.Invoke(_hostConfigurator);
+    }
+
+    public void DefaultExchange(string exchangeName)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(exchangeName);
+        _defaultExchange = exchangeName;
     }
 
     public void ConfigureTopology(Action<ITopologyConfigurator> configure)
@@ -59,6 +66,11 @@ internal sealed class RabbitMqConfigurator : IRabbitMqConfigurator
             EndpointConfigurations = _endpoints.ToArray(),
         };
 
+        if (_defaultExchange is not null)
+        {
+            options.DefaultExchange = _defaultExchange;
+        }
+
         if (_hostConfigurator is not null)
         {
             if (_hostConfigurator.UsernameValue is not null)
@@ -80,6 +92,11 @@ internal sealed class RabbitMqConfigurator : IRabbitMqConfigurator
         if (_topologyConfigurator is not null)
         {
             options.Topology = _topologyConfigurator.Build();
+        }
+
+        if (_headerMappingConfigurator is not null)
+        {
+            options.HeaderMappingConfigurator = _headerMappingConfigurator;
         }
 
         return options;

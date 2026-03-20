@@ -24,7 +24,9 @@
 //   When running via Aspire AppHost, both are provisioned automatically.
 
 using BareWire.Abstractions;
+using BareWire.Abstractions.Configuration;
 using BareWire.Core;
+using BareWire.Transport.RabbitMQ;
 using BareWire.Samples.RawMessageInterop.Consumers;
 using BareWire.Samples.RawMessageInterop.Data;
 using BareWire.Samples.RawMessageInterop.Messages;
@@ -32,6 +34,8 @@ using BareWire.Samples.RawMessageInterop.Services;
 using BareWire.Samples.ServiceDefaults;
 using BareWire.Serialization.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Storage;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
@@ -72,58 +76,62 @@ builder.Services.AddBareWireJsonSerializer();
 builder.Services.AddTransient<RawEventConsumer>();
 builder.Services.AddTransient<TypedEventConsumer>();
 
+Action<IRabbitMqConfigurator> configureRabbitMq = rmq =>
+{
+    // Connection to the RabbitMQ broker.
+    rmq.Host(rabbitMqConnectionString);
+    rmq.DefaultExchange("legacy.events");
+
+    // Custom header mapping — translate legacy system headers to BareWire canonical names.
+    // LegacyPublisher sets these headers; both consumers read the canonical mapped versions.
+    rmq.ConfigureHeaderMapping(headers =>
+    {
+        headers.MapCorrelationId("X-Correlation-Id");
+        headers.MapMessageType("X-Message-Type");
+        headers.MapHeader("SourceSystem", "X-Source-System");
+    });
+
+    // ADR-002: Manual topology — declare all exchanges, queues, and bindings explicitly.
+    // The broker resources are deployed by IBusControl.DeployTopologyAsync on startup.
+    rmq.ConfigureTopology(t =>
+    {
+        // Fanout exchange — every message from LegacyPublisher is fanned out to both queues.
+        t.DeclareExchange("legacy.events", ExchangeType.Fanout, durable: true);
+
+        // raw-events: consumed by RawEventConsumer (IRawConsumer — manual deserialization).
+        t.DeclareQueue("raw-events", durable: true);
+        t.BindExchangeToQueue("legacy.events", "raw-events", routingKey: "#");
+
+        // typed-events: consumed by TypedEventConsumer (IConsumer<ExternalEvent> — auto deserialization).
+        t.DeclareQueue("typed-events", durable: true);
+        t.BindExchangeToQueue("legacy.events", "typed-events", routingKey: "#");
+    });
+
+    // Endpoint: RawEventConsumer receives undeserialized bytes and manually calls TryDeserialize<T>.
+    rmq.ReceiveEndpoint("raw-events", e =>
+    {
+        e.PrefetchCount = 8;
+        e.ConcurrentMessageLimit = 4;
+        e.RetryCount = 3;
+        e.RetryInterval = TimeSpan.FromSeconds(5);
+        e.RawConsumer<RawEventConsumer>();
+    });
+
+    // Endpoint: TypedEventConsumer receives a fully-deserialized ExternalEvent.
+    rmq.ReceiveEndpoint("typed-events", e =>
+    {
+        e.PrefetchCount = 8;
+        e.ConcurrentMessageLimit = 4;
+        e.RetryCount = 3;
+        e.RetryInterval = TimeSpan.FromSeconds(5);
+        e.Consumer<TypedEventConsumer, ExternalEvent>();
+    });
+};
+
+builder.Services.AddBareWireRabbitMq(configureRabbitMq);
 builder.Services.AddBareWire(cfg =>
 {
-    cfg.UseRabbitMQ(rmq =>
-    {
-        // Connection to the RabbitMQ broker.
-        rmq.Host(rabbitMqConnectionString);
-
-        // Custom header mapping — translate legacy system headers to BareWire canonical names.
-        // LegacyPublisher sets these headers; both consumers read the canonical mapped versions.
-        rmq.ConfigureHeaderMapping(headers =>
-        {
-            headers.MapCorrelationId("X-Correlation-Id");
-            headers.MapMessageType("X-Message-Type");
-            headers.MapHeader("SourceSystem", "X-Source-System");
-        });
-
-        // ADR-002: Manual topology — declare all exchanges, queues, and bindings explicitly.
-        // The broker resources are deployed by IBusControl.DeployTopologyAsync on startup.
-        rmq.ConfigureTopology(t =>
-        {
-            // Fanout exchange — every message from LegacyPublisher is fanned out to both queues.
-            t.DeclareExchange("legacy.events", ExchangeType.Fanout, durable: true);
-
-            // raw-events: consumed by RawEventConsumer (IRawConsumer — manual deserialization).
-            t.DeclareQueue("raw-events", durable: true);
-            t.BindExchangeToQueue("legacy.events", "raw-events", routingKey: "#");
-
-            // typed-events: consumed by TypedEventConsumer (IConsumer<ExternalEvent> — auto deserialization).
-            t.DeclareQueue("typed-events", durable: true);
-            t.BindExchangeToQueue("legacy.events", "typed-events", routingKey: "#");
-        });
-
-        // Endpoint: RawEventConsumer receives undeserialized bytes and manually calls TryDeserialize<T>.
-        rmq.ReceiveEndpoint("raw-events", e =>
-        {
-            e.PrefetchCount = 8;
-            e.ConcurrentMessageLimit = 4;
-            e.RetryCount = 3;
-            e.RetryInterval = TimeSpan.FromSeconds(5);
-            e.RawConsumer<RawEventConsumer>();
-        });
-
-        // Endpoint: TypedEventConsumer receives a fully-deserialized ExternalEvent.
-        rmq.ReceiveEndpoint("typed-events", e =>
-        {
-            e.PrefetchCount = 8;
-            e.ConcurrentMessageLimit = 4;
-            e.RetryCount = 3;
-            e.RetryInterval = TimeSpan.FromSeconds(5);
-            e.Consumer<TypedEventConsumer, ExternalEvent>();
-        });
-    });
+    cfg.UseRabbitMQ(configureRabbitMq);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -142,10 +150,21 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<LegacyPublisher>()
 WebApplication app = builder.Build();
 
 // Development only — use migrations in production.
+// EnsureCreatedAsync is a no-op when the database already exists (e.g. created by another sample
+// sharing the same connection string). CreateTablesAsync adds missing tables for this DbContext.
 using (IServiceScope scope = app.Services.CreateScope())
 {
     InteropDbContext db = scope.ServiceProvider.GetRequiredService<InteropDbContext>();
-    await db.Database.EnsureCreatedAsync();
+    await db.Database.EnsureCreatedAsync().ConfigureAwait(false);
+    try
+    {
+        var creator = db.Database.GetInfrastructure().GetRequiredService<IRelationalDatabaseCreator>();
+        await creator.CreateTablesAsync().ConfigureAwait(false);
+    }
+    catch (Npgsql.PostgresException)
+    {
+        // Tables already exist from a previous run — safe to ignore in development.
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

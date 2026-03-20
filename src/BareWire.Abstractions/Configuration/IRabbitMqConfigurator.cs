@@ -63,6 +63,19 @@ public interface IRabbitMqConfigurator
     void ReceiveEndpoint(string queueName, Action<IReceiveEndpointConfigurator> configure);
 
     /// <summary>
+    /// Sets the default exchange name used by <c>PublishAsync</c> when no <c>BW-Exchange</c>
+    /// header is present on the outbound message.
+    /// Per ADR-002, this must match an exchange declared via <see cref="ConfigureTopology"/>.
+    /// </summary>
+    /// <param name="exchangeName">
+    /// The exchange name. Must not be <see langword="null"/> or empty.
+    /// </param>
+    /// <exception cref="ArgumentException">
+    /// Thrown when <paramref name="exchangeName"/> is <see langword="null"/> or empty.
+    /// </exception>
+    void DefaultExchange(string exchangeName);
+
+    /// <summary>
     /// Configures the mapping between BareWire canonical header names and RabbitMQ
     /// transport-specific header names. Use this to integrate with services that use
     /// non-standard or legacy header conventions.

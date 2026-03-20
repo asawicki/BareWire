@@ -35,7 +35,7 @@ internal sealed partial class RawEventConsumer(
         }
 
         // Extract the correlation ID from the mapped header (mapped from X-Correlation-Id in Program.cs).
-        context.Headers.TryGetValue("CorrelationId", out string? correlationId);
+        context.Headers.TryGetValue("correlation-id", out string? correlationId);
 
         LogReceived(logger, externalEvent.EventType, externalEvent.SourceSystem, correlationId ?? "(none)");
 

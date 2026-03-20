@@ -5,6 +5,7 @@
 using AwesomeAssertions;
 using BareWire.Abstractions.Transport;
 using BareWire.Outbox;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
 
@@ -15,12 +16,20 @@ public sealed class OutboxDispatcherTests
     private readonly IOutboxStore _store;
     private readonly ITransportAdapter _adapter;
     private readonly ILogger<OutboxDispatcher> _logger;
+    private readonly IServiceScopeFactory _scopeFactory;
 
     public OutboxDispatcherTests()
     {
         _store = Substitute.For<IOutboxStore>();
         _adapter = Substitute.For<ITransportAdapter>();
         _logger = Substitute.For<ILogger<OutboxDispatcher>>();
+
+        var serviceProvider = Substitute.For<IServiceProvider>();
+        serviceProvider.GetService(typeof(IOutboxStore)).Returns(_store);
+        var scope = Substitute.For<IServiceScope>();
+        scope.ServiceProvider.Returns(serviceProvider);
+        _scopeFactory = Substitute.For<IServiceScopeFactory>();
+        _scopeFactory.CreateScope().Returns(scope);
 
         // Default: adapter returns empty results for every send.
         _adapter
@@ -35,7 +44,7 @@ public sealed class OutboxDispatcherTests
             PollingInterval = pollingInterval ?? TimeSpan.FromMilliseconds(10),
             DispatchBatchSize = batchSize
         };
-        return new OutboxDispatcher(_store, _adapter, options, _logger);
+        return new OutboxDispatcher(_scopeFactory, _adapter, options, _logger);
     }
 
     private static OutboxEntry CreateEntry(long id, string routingKey = "test.routing.key")

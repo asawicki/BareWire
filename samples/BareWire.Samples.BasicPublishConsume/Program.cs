@@ -17,13 +17,17 @@
 //   When running via Aspire AppHost, both are provisioned automatically.
 
 using BareWire.Abstractions;
+using BareWire.Abstractions.Configuration;
 using BareWire.Core;
+using BareWire.Transport.RabbitMQ;
 using BareWire.Samples.BasicPublishConsume.Consumers;
 using BareWire.Samples.BasicPublishConsume.Data;
 using BareWire.Samples.BasicPublishConsume.Messages;
 using BareWire.Samples.ServiceDefaults;
 using BareWire.Serialization.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Storage;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
@@ -63,30 +67,34 @@ builder.Services.AddBareWireJsonSerializer();
 // Register the consumer in DI (resolved per-message by ConsumerDispatcher).
 builder.Services.AddTransient<MessageConsumer>();
 
+Action<IRabbitMqConfigurator> configureRabbitMq = rmq =>
+{
+    // Connection to the RabbitMQ broker.
+    rmq.Host(rabbitMqConnectionString);
+    rmq.DefaultExchange("messages.events");
+
+    // ADR-002: Manual topology — declare all exchanges, queues, and bindings explicitly.
+    // The broker resources are deployed by IBusControl.DeployTopologyAsync on startup.
+    rmq.ConfigureTopology(t =>
+    {
+        // Fanout exchange — every published MessageSent is delivered to the "messages" queue.
+        t.DeclareExchange("messages.events", ExchangeType.Fanout, durable: true);
+
+        t.DeclareQueue("messages", durable: true);
+        t.BindExchangeToQueue("messages.events", "messages", routingKey: "#");
+    });
+
+    // Endpoint: MessageConsumer logs and persists every MessageSent event.
+    rmq.ReceiveEndpoint("messages", e =>
+    {
+        e.Consumer<MessageConsumer, MessageSent>();
+    });
+};
+
+builder.Services.AddBareWireRabbitMq(configureRabbitMq);
 builder.Services.AddBareWire(cfg =>
 {
-    cfg.UseRabbitMQ(rmq =>
-    {
-        // Connection to the RabbitMQ broker.
-        rmq.Host(rabbitMqConnectionString);
-
-        // ADR-002: Manual topology — declare all exchanges, queues, and bindings explicitly.
-        // The broker resources are deployed by IBusControl.DeployTopologyAsync on startup.
-        rmq.ConfigureTopology(t =>
-        {
-            // Fanout exchange — every published MessageSent is delivered to the "messages" queue.
-            t.DeclareExchange("messages.events", ExchangeType.Fanout, durable: true);
-
-            t.DeclareQueue("messages", durable: true);
-            t.BindExchangeToQueue("messages.events", "messages", routingKey: "#");
-        });
-
-        // Endpoint: MessageConsumer logs and persists every MessageSent event.
-        rmq.ReceiveEndpoint("messages", e =>
-        {
-            e.Consumer<MessageConsumer, MessageSent>();
-        });
-    });
+    cfg.UseRabbitMQ(configureRabbitMq);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -96,10 +104,21 @@ builder.Services.AddBareWire(cfg =>
 WebApplication app = builder.Build();
 
 // Development only — use migrations in production.
+// EnsureCreatedAsync is a no-op when the database already exists (e.g. created by another sample
+// sharing the same connection string). CreateTablesAsync adds missing tables for this DbContext.
 using (IServiceScope scope = app.Services.CreateScope())
 {
     SampleDbContext db = scope.ServiceProvider.GetRequiredService<SampleDbContext>();
-    await db.Database.EnsureCreatedAsync();
+    await db.Database.EnsureCreatedAsync().ConfigureAwait(false);
+    try
+    {
+        var creator = db.Database.GetInfrastructure().GetRequiredService<IRelationalDatabaseCreator>();
+        await creator.CreateTablesAsync().ConfigureAwait(false);
+    }
+    catch (Npgsql.PostgresException)
+    {
+        // Tables already exist from a previous run — safe to ignore in development.
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using OpenTelemetry.Trace;
 
 namespace BareWire.Samples.ServiceDefaults;
 
@@ -29,6 +30,12 @@ public static class ServiceDefaultsExtensions
             cfg.EnableOpenTelemetry = true;
             cfg.UseOtlpExporter();
         });
+
+        // ASP.NET Core + HttpClient instrumentation for HTTP request traces in Aspire Dashboard.
+        builder.Services.AddOpenTelemetry()
+            .WithTracing(tracing => tracing
+                .AddAspNetCoreInstrumentation()
+                .AddHttpClientInstrumentation());
 
         // Standard health checks pipeline — individual checks are added by each sample
         // (e.g. AddNpgsql, AddRabbitMQ). MapServiceDefaults exposes the /health endpoints.

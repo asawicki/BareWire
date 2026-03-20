@@ -19,7 +19,9 @@
 //   When running via Aspire AppHost, connection strings are injected automatically.
 
 using BareWire.Abstractions;
+using BareWire.Abstractions.Configuration;
 using BareWire.Core;
+using BareWire.Transport.RabbitMQ;
 using BareWire.Observability;
 using BareWire.Samples.RequestResponse.Consumers;
 using BareWire.Samples.RequestResponse.Data;
@@ -27,6 +29,8 @@ using BareWire.Samples.RequestResponse.Messages;
 using BareWire.Samples.ServiceDefaults;
 using BareWire.Serialization.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Storage;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
@@ -61,36 +65,40 @@ builder.Services.AddBareWireJsonSerializer();
 // Register consumer in DI (resolved per-message by ConsumerDispatcher).
 builder.Services.AddTransient<OrderValidationConsumer>();
 
+Action<IRabbitMqConfigurator> configureRabbitMq = rmq =>
+{
+    // Connection to the RabbitMQ broker.
+    rmq.Host(rabbitMqConnectionString);
+    rmq.DefaultExchange("order-validation");
+
+    // ADR-002: Manual topology — declare all exchanges, queues, and bindings explicitly.
+    // The broker resources are deployed by IBusControl.DeployTopologyAsync on startup.
+    rmq.ConfigureTopology(t =>
+    {
+        // Direct exchange: routes ValidateOrder commands to the single validation queue.
+        t.DeclareExchange("order-validation", ExchangeType.Direct, durable: true);
+
+        // Queue for OrderValidationConsumer.
+        t.DeclareQueue("order-validation", durable: true);
+        t.BindExchangeToQueue("order-validation", "order-validation", routingKey: "BareWire.Samples.RequestResponse.Messages.ValidateOrder");
+    });
+
+    // Endpoint: OrderValidationConsumer processes ValidateOrder requests and responds
+    // with OrderValidationResult via context.RespondAsync().
+    rmq.ReceiveEndpoint("order-validation", e =>
+    {
+        e.PrefetchCount = 16;
+        e.ConcurrentMessageLimit = 8;
+        e.RetryCount = 3;
+        e.RetryInterval = TimeSpan.FromSeconds(5);
+        e.Consumer<OrderValidationConsumer, ValidateOrder>();
+    });
+};
+
+builder.Services.AddBareWireRabbitMq(configureRabbitMq);
 builder.Services.AddBareWire(cfg =>
 {
-    cfg.UseRabbitMQ(rmq =>
-    {
-        // Connection to the RabbitMQ broker.
-        rmq.Host(rabbitMqConnectionString);
-
-        // ADR-002: Manual topology — declare all exchanges, queues, and bindings explicitly.
-        // The broker resources are deployed by IBusControl.DeployTopologyAsync on startup.
-        rmq.ConfigureTopology(t =>
-        {
-            // Direct exchange: routes ValidateOrder commands to the single validation queue.
-            t.DeclareExchange("order-validation", ExchangeType.Direct, durable: true);
-
-            // Queue for OrderValidationConsumer.
-            t.DeclareQueue("order-validation", durable: true);
-            t.BindExchangeToQueue("order-validation", "order-validation", routingKey: "order-validation");
-        });
-
-        // Endpoint: OrderValidationConsumer processes ValidateOrder requests and responds
-        // with OrderValidationResult via context.RespondAsync().
-        rmq.ReceiveEndpoint("order-validation", e =>
-        {
-            e.PrefetchCount = 16;
-            e.ConcurrentMessageLimit = 8;
-            e.RetryCount = 3;
-            e.RetryInterval = TimeSpan.FromSeconds(5);
-            e.Consumer<OrderValidationConsumer, ValidateOrder>();
-        });
-    });
+    cfg.UseRabbitMQ(configureRabbitMq);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -107,10 +115,21 @@ builder.Services.AddDbContext<ValidationDbContext>(options =>
 WebApplication app = builder.Build();
 
 // Development only — use migrations in production.
+// EnsureCreatedAsync is a no-op when the database already exists (e.g. created by another sample
+// sharing the same connection string). CreateTablesAsync adds missing tables for this DbContext.
 using (IServiceScope scope = app.Services.CreateScope())
 {
     ValidationDbContext db = scope.ServiceProvider.GetRequiredService<ValidationDbContext>();
     await db.Database.EnsureCreatedAsync().ConfigureAwait(false);
+    try
+    {
+        var creator = db.Database.GetInfrastructure().GetRequiredService<IRelationalDatabaseCreator>();
+        await creator.CreateTablesAsync().ConfigureAwait(false);
+    }
+    catch (Npgsql.PostgresException)
+    {
+        // Tables already exist from a previous run — safe to ignore in development.
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

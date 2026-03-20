@@ -23,10 +23,13 @@
 //   - SQLite database file (created automatically on first run)
 
 using BareWire.Abstractions;
+using BareWire.Abstractions.Configuration;
 using BareWire.Core;
+using BareWire.Transport.RabbitMQ;
 using BareWire.Samples.RabbitMQ.Models;
 using BareWire.Observability;
 using BareWire.Outbox.EntityFramework;
+using BareWire.Saga;
 using BareWire.Saga.EntityFramework;
 using BareWire.Samples.RabbitMQ.Consumers;
 using BareWire.Samples.RabbitMQ.Messages;
@@ -71,53 +74,57 @@ builder.Services.AddBareWireJsonSerializer();
 // Register consumers in DI (resolved per-message by ConsumerDispatcher).
 builder.Services.AddTransient<OrderConsumer>();
 
+Action<IRabbitMqConfigurator> configureRabbitMq = rmq =>
+{
+    // Connection to the RabbitMQ broker.
+    rmq.Host(rabbitMqConnectionString);
+    rmq.DefaultExchange("order.events");
+
+    // ADR-002: Manual topology — declare all exchanges, queues, and bindings explicitly.
+    // The broker resources are deployed by IBusControl.DeployTopologyAsync on startup.
+    rmq.ConfigureTopology(t =>
+    {
+        // Fanout exchange — every message published to "order.events" is delivered
+        // to both consumer queues: "orders" and "order-saga".
+        t.DeclareExchange("order.events", ExchangeType.Fanout, durable: true);
+
+        // Queue for OrderConsumer (processes OrderCreated → publishes OrderProcessed).
+        t.DeclareQueue("orders", durable: true);
+        t.BindExchangeToQueue("order.events", "orders", routingKey: "#");
+
+        // Queue for OrderSagaStateMachine (correlates OrderCreated / PaymentReceived / PaymentFailed).
+        t.DeclareQueue("order-saga", durable: true);
+        t.BindExchangeToQueue("order.events", "order-saga", routingKey: "#");
+    });
+
+    // Endpoint: OrderConsumer processes OrderCreated messages.
+    // ConfigureConsumeTopology defaults to false (ADR-002: manual topology).
+    rmq.ReceiveEndpoint("orders", e =>
+    {
+        e.PrefetchCount = 16;
+        e.ConcurrentMessageLimit = 8;
+        e.RetryCount = 3;
+        e.RetryInterval = TimeSpan.FromSeconds(5);
+        e.Consumer<OrderConsumer, OrderCreated>();
+    });
+
+    // Endpoint: OrderSagaStateMachine correlates events and drives the order lifecycle.
+    rmq.ReceiveEndpoint("order-saga", e =>
+    {
+        e.PrefetchCount = 8;
+        e.ConcurrentMessageLimit = 4;
+        e.StateMachineSaga<OrderSagaStateMachine>();
+    });
+};
+
+// NOTE: cfg.UseSerializer<T>() is a placeholder API for when the bus needs to know
+// the serializer type at configuration time (e.g. for type-discriminator headers).
+// The actual IMessageSerializer is already registered above via AddBareWireJsonSerializer().
+
+builder.Services.AddBareWireRabbitMq(configureRabbitMq);
 builder.Services.AddBareWire(cfg =>
 {
-    // NOTE: cfg.UseSerializer<T>() is a placeholder API for when the bus needs to know
-    // the serializer type at configuration time (e.g. for type-discriminator headers).
-    // The actual IMessageSerializer is already registered above via AddBareWireJsonSerializer().
-
-    cfg.UseRabbitMQ(rmq =>
-    {
-        // Connection to the RabbitMQ broker.
-        rmq.Host(rabbitMqConnectionString);
-
-        // ADR-002: Manual topology — declare all exchanges, queues, and bindings explicitly.
-        // The broker resources are deployed by IBusControl.DeployTopologyAsync on startup.
-        rmq.ConfigureTopology(t =>
-        {
-            // Fanout exchange — every message published to "order.events" is delivered
-            // to both consumer queues: "orders" and "order-saga".
-            t.DeclareExchange("order.events", ExchangeType.Fanout, durable: true);
-
-            // Queue for OrderConsumer (processes OrderCreated → publishes OrderProcessed).
-            t.DeclareQueue("orders", durable: true);
-            t.BindExchangeToQueue("order.events", "orders", routingKey: "#");
-
-            // Queue for OrderSagaStateMachine (correlates OrderCreated / PaymentReceived / PaymentFailed).
-            t.DeclareQueue("order-saga", durable: true);
-            t.BindExchangeToQueue("order.events", "order-saga", routingKey: "#");
-        });
-
-        // Endpoint: OrderConsumer processes OrderCreated messages.
-        // ConfigureConsumeTopology defaults to false (ADR-002: manual topology).
-        rmq.ReceiveEndpoint("orders", e =>
-        {
-            e.PrefetchCount = 16;
-            e.ConcurrentMessageLimit = 8;
-            e.RetryCount = 3;
-            e.RetryInterval = TimeSpan.FromSeconds(5);
-            e.Consumer<OrderConsumer, OrderCreated>();
-        });
-
-        // Endpoint: OrderSagaStateMachine correlates events and drives the order lifecycle.
-        rmq.ReceiveEndpoint("order-saga", e =>
-        {
-            e.PrefetchCount = 8;
-            e.ConcurrentMessageLimit = 4;
-            e.StateMachineSaga<OrderSagaStateMachine>();
-        });
-    });
+    cfg.UseRabbitMQ(configureRabbitMq);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -129,8 +136,8 @@ builder.Services.AddBareWire(cfg =>
 builder.Services.AddBareWireSaga<OrderSagaState>(
     options => options.UseSqlite(dbConnectionString));
 
-// Register the state machine so the runtime can resolve it from DI.
-builder.Services.AddSingleton<OrderSagaStateMachine>();
+// Register the state machine and wire its message dispatcher into the consume pipeline.
+builder.Services.AddBareWireSagaStateMachine<OrderSagaStateMachine, OrderSagaState>();
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 5. Transactional outbox / inbox (EF Core + SQLite)

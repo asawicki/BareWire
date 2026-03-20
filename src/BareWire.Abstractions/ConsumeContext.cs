@@ -146,7 +146,16 @@ public abstract class ConsumeContext : IPublishEndpoint, ISendEndpointProvider
         // If a ReplyTo header exists, send the response directly to that address (request-response pattern).
         if (Headers.TryGetValue("ReplyTo", out string? replyTo) && !string.IsNullOrEmpty(replyTo))
         {
-            ISendEndpoint endpoint = await GetSendEndpoint(new Uri(replyTo), cancellationToken)
+            // Build a queue-scheme URI that signals direct-to-queue delivery via the default exchange.
+            // Correlation-id is encoded as a query parameter so the send endpoint can forward it
+            // to the transport (required by the request client to match responses).
+            Headers.TryGetValue("correlation-id", out string? correlationId);
+
+            string uriString = correlationId is not null
+                ? $"queue://localhost/{Uri.EscapeDataString(replyTo)}?correlation-id={Uri.EscapeDataString(correlationId)}"
+                : $"queue://localhost/{Uri.EscapeDataString(replyTo)}";
+
+            ISendEndpoint endpoint = await GetSendEndpoint(new Uri(uriString), cancellationToken)
                 .ConfigureAwait(false);
             await endpoint.SendAsync(response, cancellationToken).ConfigureAwait(false);
             return;

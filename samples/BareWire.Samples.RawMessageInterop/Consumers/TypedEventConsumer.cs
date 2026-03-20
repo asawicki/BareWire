@@ -19,7 +19,7 @@ internal sealed partial class TypedEventConsumer(
         ExternalEvent evt = context.Message;
 
         // Extract the correlation ID from the mapped header (mapped from X-Correlation-Id in Program.cs).
-        context.Headers.TryGetValue("CorrelationId", out string? correlationId);
+        context.Headers.TryGetValue("correlation-id", out string? correlationId);
 
         LogReceived(logger, evt.EventType, evt.SourceSystem, correlationId ?? "(none)");
 

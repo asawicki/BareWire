@@ -3,6 +3,7 @@ using BareWire.Abstractions.Pipeline;
 using BareWire.Outbox;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace BareWire.Outbox.EntityFramework;
 
@@ -48,14 +49,24 @@ public static class ServiceCollectionExtensions
 
         // Register the EF Core store implementations as scoped — they depend on the
         // scoped OutboxDbContext and must not outlive it.
-        services.AddScoped<IOutboxStore, EfCoreOutboxStore>();
-        services.AddScoped<IInboxStore, EfCoreInboxStore>();
+        // Factory lambdas are required because the implementation classes have internal constructors.
+        services.AddScoped<IOutboxStore>(sp =>
+            new EfCoreOutboxStore(sp.GetRequiredService<OutboxDbContext>()));
+        services.AddScoped<IInboxStore>(sp =>
+            new EfCoreInboxStore(sp.GetRequiredService<OutboxDbContext>()));
 
         // Register InboxFilter as scoped — it depends on the scoped IInboxStore.
-        services.AddScoped<InboxFilter>();
+        services.AddScoped(sp => new InboxFilter(
+            sp.GetRequiredService<IInboxStore>(),
+            sp.GetRequiredService<OutboxOptions>(),
+            sp.GetRequiredService<ILogger<InboxFilter>>()));
 
         // Register the transactional middleware as scoped (depends on OutboxDbContext + EfCoreInboxStore).
-        services.AddScoped<IMessageMiddleware, TransactionalOutboxMiddleware>();
+        services.AddScoped<IMessageMiddleware>(sp => new TransactionalOutboxMiddleware(
+            sp.GetRequiredService<OutboxDbContext>(),
+            sp.GetRequiredService<IOutboxStore>(),
+            sp.GetRequiredService<InboxFilter>(),
+            sp.GetRequiredService<ILogger<TransactionalOutboxMiddleware>>()));
 
         // Register the background services that poll and dispatch pending outbox messages
         // and periodically clean up expired outbox/inbox records.

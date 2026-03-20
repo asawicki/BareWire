@@ -7,6 +7,8 @@ using BareWire.Abstractions.Topology;
 using BareWire.Abstractions.Transport;
 using BareWire.Transport.RabbitMQ;
 using Microsoft.Extensions.Logging.Abstractions;
+using RabbitMQ.Client;
+using ExchangeType = BareWire.Abstractions.ExchangeType;
 
 namespace BareWire.IntegrationTests.Transport;
 
@@ -94,6 +96,80 @@ public sealed class RabbitMqE2ETests(AspireFixture fixture)
 
     private static FlowControlOptions StandardFlow() =>
         new() { MaxInFlightMessages = 10, InternalQueueCapacity = 100 };
+
+    /// <summary>
+    /// Starts a background responder for request-response tests.
+    /// Consumes <see cref="TestPaymentRequest"/> messages, replies with <see cref="TestPaymentResponse"/>
+    /// using AMQP ReplyTo and CorrelationId properties.
+    /// </summary>
+    private async Task<(CancellationTokenSource ResponderCts, Task ResponderTask)> StartPaymentResponderAsync(
+        string queueName,
+        CancellationToken ct)
+    {
+        var factory = new RabbitMQ.Client.ConnectionFactory
+        {
+            Uri = new Uri(fixture.GetRabbitMqConnectionString()),
+            AutomaticRecoveryEnabled = false,
+        };
+        IConnection responderConnection = await factory.CreateConnectionAsync(ct);
+
+        IChannel responderChannel = await responderConnection
+            .CreateChannelAsync(
+                new CreateChannelOptions(
+                    publisherConfirmationsEnabled: true,
+                    publisherConfirmationTrackingEnabled: true),
+                ct);
+
+        var consumer = new RabbitMQ.Client.Events.AsyncEventingBasicConsumer(responderChannel);
+        consumer.ReceivedAsync += async (_, args) =>
+        {
+            string? replyTo = args.BasicProperties.ReplyTo;
+            string? correlationId = args.BasicProperties.CorrelationId;
+            if (string.IsNullOrEmpty(replyTo) || string.IsNullOrEmpty(correlationId))
+                return;
+
+            var jsonOpts = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+            var request = JsonSerializer.Deserialize<TestPaymentRequest>(args.Body.Span, jsonOpts);
+            var response = new TestPaymentResponse(request!.OrderId, Approved: true);
+            byte[] responseBody = JsonSerializer.SerializeToUtf8Bytes(response, jsonOpts);
+
+            var props = new RabbitMQ.Client.BasicProperties
+            {
+                CorrelationId = correlationId,
+                ContentType = "application/json",
+            };
+
+            await responderChannel.BasicPublishAsync<RabbitMQ.Client.BasicProperties>(
+                exchange: string.Empty,
+                routingKey: replyTo,
+                mandatory: false,
+                basicProperties: props,
+                body: responseBody);
+
+            await responderChannel.BasicAckAsync(args.DeliveryTag, multiple: false);
+        };
+
+        await responderChannel.BasicConsumeAsync(
+            queue: queueName, autoAck: false, consumer: consumer, cancellationToken: ct);
+
+        CancellationTokenSource responderCts = new();
+        Task responderTask = Task.Run(
+            async () =>
+            {
+                try { await Task.Delay(Timeout.Infinite, responderCts.Token).ConfigureAwait(false); }
+                catch (OperationCanceledException) { }
+                finally
+                {
+                    await responderChannel.CloseAsync();
+                    await responderChannel.DisposeAsync();
+                    await responderConnection.CloseAsync();
+                    await responderConnection.DisposeAsync();
+                }
+            },
+            CancellationToken.None);
+
+        return (responderCts, responderTask);
+    }
 
     /// <summary>
     /// Reads exactly one message from the adapter's consume stream, honouring the given timeout.
@@ -378,12 +454,50 @@ public sealed class RabbitMqE2ETests(AspireFixture fixture)
     [Trait("Category", "E2E")]
     public async Task RequestResponse_HappyPath_ReturnsResponse()
     {
-        // This test is a placeholder — RabbitMqRequestClient<T> (task 3.9) is not yet
-        // available. Once it is implemented, replace this body with the full scenario.
-        await Task.CompletedTask;
-        Assert.Fail(
-            "Not yet implemented. Requires RabbitMqRequestClient<T> from task 3.9. " +
-            "See XML doc comment for the intended test scenario.");
+        // Arrange
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
+        await using RabbitMqTransportAdapter adapter = CreateAdapter();
+
+        string suffix = Guid.NewGuid().ToString("N");
+        string queueName = $"e2e-rr-q-{suffix}";
+
+        var configurator = new RabbitMqTopologyConfigurator();
+        configurator.DeclareQueue(queueName, durable: false, autoDelete: false);
+        await adapter.DeployTopologyAsync(configurator.Build(), cts.Token);
+
+        // Start a responder that echoes TestPaymentRequest as TestPaymentResponse
+        (CancellationTokenSource responderCts, Task responderTask) =
+            await StartPaymentResponderAsync(queueName, cts.Token);
+
+        var factory = new RabbitMQ.Client.ConnectionFactory
+        {
+            Uri = new Uri(fixture.GetRabbitMqConnectionString()),
+            AutomaticRecoveryEnabled = false,
+        };
+        await using IConnection clientConnection = await factory.CreateConnectionAsync(cts.Token);
+
+        var serializer = new BareWire.Serialization.Json.SystemTextJsonSerializer();
+        var deserializer = new BareWire.Serialization.Json.SystemTextJsonRawDeserializer();
+
+        var client = new RabbitMqRequestClient<TestPaymentRequest>(
+            clientConnection, serializer, deserializer, NullLogger.Instance,
+            targetExchange: string.Empty, routingKey: queueName,
+            timeout: TimeSpan.FromSeconds(10));
+        await client.InitializeAsync(cts.Token);
+
+        // Act
+        Response<TestPaymentResponse> response = await client
+            .GetResponseAsync<TestPaymentResponse>(new TestPaymentRequest("O-1", 99m), cts.Token);
+
+        // Assert
+        response.Message.Approved.Should().BeTrue();
+        response.Message.OrderId.Should().Be("O-1");
+
+        // Cleanup
+        await client.DisposeAsync();
+        await responderCts.CancelAsync();
+        try { await responderTask; } catch (OperationCanceledException) { }
+        responderCts.Dispose();
     }
 
     // ── E2E-6: Request-response — no responder → timeout (placeholder) ────────
@@ -413,12 +527,40 @@ public sealed class RabbitMqE2ETests(AspireFixture fixture)
     [Trait("Category", "E2E")]
     public async Task RequestResponse_NoResponder_ThrowsTimeout()
     {
-        // This test is a placeholder — RabbitMqRequestClient<T> (task 3.9) is not yet
-        // available. Once it is implemented, replace this body with the full scenario.
-        await Task.CompletedTask;
-        Assert.Fail(
-            "Not yet implemented. Requires RabbitMqRequestClient<T> from task 3.9. " +
-            "See XML doc comment for the intended test scenario.");
+        // Arrange — no responder, short timeout
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
+        await using RabbitMqTransportAdapter adapter = CreateAdapter();
+
+        string suffix = Guid.NewGuid().ToString("N");
+        string queueName = $"e2e-rr-timeout-{suffix}";
+
+        var configurator = new RabbitMqTopologyConfigurator();
+        configurator.DeclareQueue(queueName, durable: false, autoDelete: false);
+        await adapter.DeployTopologyAsync(configurator.Build(), cts.Token);
+
+        var factory = new RabbitMQ.Client.ConnectionFactory
+        {
+            Uri = new Uri(fixture.GetRabbitMqConnectionString()),
+            AutomaticRecoveryEnabled = false,
+        };
+        await using IConnection clientConnection = await factory.CreateConnectionAsync(cts.Token);
+
+        var serializer = new BareWire.Serialization.Json.SystemTextJsonSerializer();
+        var deserializer = new BareWire.Serialization.Json.SystemTextJsonRawDeserializer();
+
+        var client = new RabbitMqRequestClient<TestPaymentRequest>(
+            clientConnection, serializer, deserializer, NullLogger.Instance,
+            targetExchange: string.Empty, routingKey: queueName,
+            timeout: TimeSpan.FromMilliseconds(500));
+        await client.InitializeAsync(cts.Token);
+
+        // Act & Assert
+        Func<Task> act = async () => await client
+            .GetResponseAsync<TestPaymentResponse>(new TestPaymentRequest("O-2", 50m), cts.Token);
+
+        await act.Should().ThrowAsync<BareWire.Abstractions.Exceptions.RequestTimeoutException>();
+
+        await client.DisposeAsync();
     }
 
     // ── E2E-7: Multiple consumers on one queue → round-robin delivery ─────────
@@ -444,7 +586,6 @@ public sealed class RabbitMqE2ETests(AspireFixture fixture)
 
         const int TotalMessages = 10;
 
-        // Pre-publish all messages so they are queued before consumers start
         OutboundMessage[] messages = Enumerable
             .Range(1, TotalMessages)
             .Select(i => new OutboundMessage(
@@ -456,8 +597,6 @@ public sealed class RabbitMqE2ETests(AspireFixture fixture)
                 body: Encoding.UTF8.GetBytes($"{{\"seq\":{i}}}"),
                 contentType: "application/json"))
             .ToArray();
-
-        await adapter.SendBatchAsync(messages, cts.Token);
 
         // Act — start two consumers concurrently on the same queue.
         // Each consumer runs its own ConsumeAsync loop, collecting messages until the shared
@@ -472,7 +611,10 @@ public sealed class RabbitMqE2ETests(AspireFixture fixture)
             System.Collections.Concurrent.ConcurrentBag<InboundMessage> bag,
             CancellationToken token)
         {
-            FlowControlOptions flow = StandardFlow();
+            // Low prefetch (1) ensures RabbitMQ round-robins fairly between consumers.
+            // StandardFlow (prefetch 10) would let one consumer grab all messages before
+            // the other registers with the broker.
+            FlowControlOptions flow = new() { MaxInFlightMessages = 1, InternalQueueCapacity = 10 };
 
             await foreach (InboundMessage msg in adapter.ConsumeAsync(queueName, flow, token))
             {
@@ -489,6 +631,11 @@ public sealed class RabbitMqE2ETests(AspireFixture fixture)
 
         Task consumer1Task = RunConsumerAsync(consumer1Messages, stopCts.Token);
         Task consumer2Task = RunConsumerAsync(consumer2Messages, stopCts.Token);
+
+        // Let both consumers register with the broker before publishing.
+        // Without this, consumer 1 can consume all messages before consumer 2 registers.
+        await Task.Delay(500, cts.Token);
+        await adapter.SendBatchAsync(messages, cts.Token);
 
         // Wait for both consumers to complete (either naturally or via cancellation)
         await Task.WhenAll(
@@ -510,9 +657,11 @@ public sealed class RabbitMqE2ETests(AspireFixture fixture)
         consumer2Count.Should().BeGreaterThan(0,
             because: "consumer 2 must receive at least one message when 10 are published");
 
-        // Verify no duplicate delivery tags across both consumers
-        IEnumerable<ulong> allTags = consumer1Messages.Select(m => m.DeliveryTag)
-            .Concat(consumer2Messages.Select(m => m.DeliveryTag));
-        allTags.Should().OnlyHaveUniqueItems(because: "each message must be delivered exactly once");
+        // Verify no duplicate delivery tags within each consumer (delivery tags are per-channel
+        // in RabbitMQ, so tags from different channels are expected to overlap).
+        consumer1Messages.Select(m => m.DeliveryTag).Should()
+            .OnlyHaveUniqueItems(because: "consumer 1 must not receive the same message twice");
+        consumer2Messages.Select(m => m.DeliveryTag).Should()
+            .OnlyHaveUniqueItems(because: "consumer 2 must not receive the same message twice");
     }
 }

@@ -130,7 +130,10 @@ public sealed class SagaConcurrencyTests(AspireFixture fixture)
         CancellationToken ct)
         where TEvent : class
     {
-        FlowControlOptions flow = new() { MaxInFlightMessages = 50, InternalQueueCapacity = 200 };
+        // Prefetch 1 to avoid pushing all messages to a consumer that only processes one.
+        // With higher prefetch, excess messages are nack-requeued when the consumer breaks,
+        // causing repeated requeue storms that can time out the test.
+        FlowControlOptions flow = new() { MaxInFlightMessages = 1, InternalQueueCapacity = 10 };
 
         await foreach (InboundMessage inbound in adapter.ConsumeAsync(queueName, flow, ct))
         {
