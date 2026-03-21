@@ -12,6 +12,7 @@ internal sealed record OutboxOptions
     public TimeSpan OutboxRetention { get; init; } = TimeSpan.FromDays(7);
     public TimeSpan InboxLockTimeout { get; init; } = TimeSpan.FromSeconds(30);
     public TimeSpan CleanupInterval { get; init; } = TimeSpan.FromHours(1);
+    public bool AutoCreateSchema { get; init; }
 
     internal void Validate()
     {

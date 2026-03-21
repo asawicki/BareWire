@@ -3,6 +3,7 @@ using BareWire.Abstractions.Pipeline;
 using BareWire.Outbox;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace BareWire.Outbox.EntityFramework;
@@ -89,6 +90,11 @@ public static class ServiceCollectionExtensions
         }
 
         services.AddSingleton(options);
+
+        if (options.AutoCreateSchema)
+        {
+            services.AddHostedService<OutboxSchemaInitializer>();
+        }
 
         return services;
     }

@@ -45,4 +45,10 @@ public interface IOutboxConfigurator
     /// Defaults to <c>1 hour</c>.
     /// </summary>
     TimeSpan CleanupInterval { get; set; }
+
+    /// <summary>
+    /// When <see langword="true"/>, Outbox/Inbox tables are created automatically at host startup.
+    /// Default: <see langword="false"/>.
+    /// </summary>
+    bool AutoCreateSchema { get; set; }
 }

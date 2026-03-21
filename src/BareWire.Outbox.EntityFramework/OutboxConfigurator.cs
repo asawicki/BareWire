@@ -15,6 +15,7 @@ internal sealed class OutboxConfigurator : IOutboxConfigurator
     private TimeSpan _outboxRetention = OutboxOptions.Default.OutboxRetention;
     private TimeSpan _inboxLockTimeout = OutboxOptions.Default.InboxLockTimeout;
     private TimeSpan _cleanupInterval = OutboxOptions.Default.CleanupInterval;
+    private bool _autoCreateSchema = OutboxOptions.Default.AutoCreateSchema;
 
     /// <inheritdoc />
     public TimeSpan PollingInterval
@@ -58,6 +59,13 @@ internal sealed class OutboxConfigurator : IOutboxConfigurator
         set => _cleanupInterval = value;
     }
 
+    /// <inheritdoc />
+    public bool AutoCreateSchema
+    {
+        get => _autoCreateSchema;
+        set => _autoCreateSchema = value;
+    }
+
     /// <summary>
     /// Builds and validates the <see cref="OutboxOptions"/> from the accumulated configuration.
     /// </summary>
@@ -74,6 +82,7 @@ internal sealed class OutboxConfigurator : IOutboxConfigurator
             OutboxRetention = _outboxRetention,
             InboxLockTimeout = _inboxLockTimeout,
             CleanupInterval = _cleanupInterval,
+            AutoCreateSchema = _autoCreateSchema,
         };
 
         options.Validate();
