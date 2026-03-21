@@ -337,6 +337,7 @@ namespace BareWire.Abstractions.Outbox
 {
     public interface IOutboxConfigurator
     {
+        bool AutoCreateSchema { get; set; }
         System.TimeSpan CleanupInterval { get; set; }
         int DispatchBatchSize { get; set; }
         System.TimeSpan InboxLockTimeout { get; set; }
