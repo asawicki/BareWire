@@ -1,0 +1,28 @@
+@host = http://localhost:5109
+
+### Publish a payment event (first time — processed by both Email and Audit consumers)
+POST {{host}}/payments
+Content-Type: application/json
+
+{
+  "payer": "Alice",
+  "payee": "Bob",
+  "amount": 150.00
+}
+
+### Publish duplicate with same PaymentId (rejected by inbox for both consumers)
+### Replace the paymentId query parameter with a PaymentId from the first POST response.
+POST {{host}}/payments/duplicate?paymentId=REPLACE_WITH_PAYMENT_ID
+
+### Simulate redelivery — re-publish a message with a previously used PaymentId
+### Replace the paymentId query parameter with a PaymentId from the first POST response.
+POST {{host}}/payments/redeliver?paymentId=REPLACE_WITH_PAYMENT_ID
+
+### List all processed notifications (shows Email + Audit entries, no duplicates)
+GET {{host}}/notifications
+
+### Inspect inbox table state (shows MessageId + ConsumerType composite entries)
+GET {{host}}/inbox
+
+### Health check
+GET {{host}}/health

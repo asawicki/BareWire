@@ -60,4 +60,14 @@ builder.AddProject<Projects.BareWire_Samples_MultiConsumerPartitioning>("multi-c
     .WaitFor(rabbitmq)
     .WaitFor(postgres);
 
+builder.AddProject<Projects.BareWire_Samples_InboxDeduplication>("inbox-deduplication")
+    .WithReference(rabbitmq)
+    .WithReference(postgres)
+    .WaitFor(rabbitmq)
+    .WaitFor(postgres);
+
+builder.AddProject<Projects.BareWire_Samples_RabbitMQ>("rabbitmq-sample")
+    .WithReference(rabbitmq)
+    .WaitFor(rabbitmq);
+
 builder.Build().Run();

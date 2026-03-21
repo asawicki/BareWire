@@ -12,6 +12,7 @@
     <Project Path="samples/BareWire.Samples.BackpressureDemo/BareWire.Samples.BackpressureDemo.csproj" />
     <Project Path="samples/BareWire.Samples.ObservabilityShowcase/BareWire.Samples.ObservabilityShowcase.csproj" />
     <Project Path="samples/BareWire.Samples.MultiConsumerPartitioning/BareWire.Samples.MultiConsumerPartitioning.csproj" />
+    <Project Path="samples/BareWire.Samples.InboxDeduplication/BareWire.Samples.InboxDeduplication.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/BareWire.Abstractions/BareWire.Abstractions.csproj" />
