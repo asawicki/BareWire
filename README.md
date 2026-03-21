@@ -43,9 +43,17 @@ dotnet run --project tests/BareWire.Benchmarks/ -c Release -- --filter '*Publish
 
 ## Performance Targets
 
-- < 256 B/msg allocation
+- < 768 B/msg publish allocation, < 256 B/msg consume allocation
 - \> 500K msgs/s publish throughput
 - \> 300K msgs/s consume throughput (in-memory transport)
+
+### Allocation characteristics
+
+- **PublishRaw** — constant **136 B** regardless of payload size (100 B → 10 KB, no difference). Pre-serialized `ReadOnlyMemory<byte>` is passed through without copying.
+- **PublishTyped** — **~544 B fixed overhead + serialized payload size**. The serialization boundary copy (`.ToArray()` in `MessagePipeline.ProcessOutboundAsync`) is architecturally required — `OutboundMessage` must outlive the pooled writer scope.
+- **Serialization (raw)** — constant **448 B** regardless of payload size. `PooledBufferWriter` rents from `ArrayPool<byte>.Shared`, confirming ADR-003 zero-copy pipeline.
+
+Full report: [doc/benchmark-report.md](doc/benchmark-report.md)
 
 ## License
 

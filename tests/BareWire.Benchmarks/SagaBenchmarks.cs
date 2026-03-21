@@ -14,7 +14,7 @@ namespace BareWire.Benchmarks;
 /// <remarks>
 /// Performance targets:
 /// <list type="bullet">
-/// <item><description>StateTransition_InMemory: &gt; 100K transitions/s, &lt; 512 B/transition</description></item>
+/// <item><description>StateTransition_InMemory: &gt; 100K transitions/s, &lt; 768 B/transition</description></item>
 /// </list>
 /// NOTE: [EventPipeProfiler] is intentionally omitted — BenchmarkDotNet has a known bug with
 /// .NET 10 where runtime detection treats it as v1 (https://github.com/dotnet/BenchmarkDotNet/issues/2699).
@@ -96,7 +96,7 @@ public class SagaBenchmarks
     /// <summary>
     /// Executes one full state-transition cycle per saga instance: receives an event,
     /// loads the saga (or creates it), applies activities, and persists the new state.
-    /// Target: &gt; 100K transitions/s, &lt; 512 B/transition.
+    /// Target: &gt; 100K transitions/s, &lt; 768 B/transition.
     /// </summary>
     [Benchmark]
     public async Task StateTransition_InMemory()

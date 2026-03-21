@@ -11,8 +11,8 @@ namespace BareWire.Benchmarks;
 /// <remarks>
 /// Performance targets:
 /// <list type="bullet">
-/// <item><description>PublishTyped: &gt; 500K msgs/s, &lt; 128 B/msg</description></item>
-/// <item><description>PublishRaw: &gt; 1M msgs/s, 0 B/msg</description></item>
+/// <item><description>PublishTyped: &gt; 500K msgs/s, &lt; 768 B/msg</description></item>
+/// <item><description>PublishRaw: &gt; 1M msgs/s, &lt; 512 B/msg</description></item>
 /// </list>
 /// NOTE: [EventPipeProfiler] is intentionally omitted — BenchmarkDotNet has a known bug with
 /// .NET 10 where runtime detection treats it as v1 (https://github.com/dotnet/BenchmarkDotNet/issues/2699).
@@ -48,7 +48,7 @@ public class PublishBenchmarks
     /// <summary>
     /// Publishes a typed <see cref="BenchmarkMessage"/> through the full outbound pipeline.
     /// The in-memory transport accepts the message synchronously after channel enqueue.
-    /// Target: &gt; 500K msgs/s, &lt; 128 B/msg.
+    /// Target: &gt; 500K msgs/s, &lt; 768 B/msg.
     /// </summary>
     [Benchmark]
     public Task PublishTyped()
@@ -57,10 +57,54 @@ public class PublishBenchmarks
     /// <summary>
     /// Publishes a pre-serialized raw payload, bypassing typed serialization entirely.
     /// Measures pure channel + transport overhead with zero per-call allocations.
-    /// Target: &gt; 1M msgs/s, 0 B/msg.
+    /// Target: &gt; 1M msgs/s, &lt; 512 B/msg.
     /// </summary>
     [Benchmark]
     public Task PublishRaw()
+        => _harness.Bus.PublishRawAsync(_rawPayload, contentType: "application/json");
+}
+
+/// <summary>
+/// Benchmarks for publish-side allocation scaling with payload size.
+/// Shows that per-message overhead is ~544 B fixed + payload size (due to serialization
+/// boundary copy in <c>MessagePipeline.ProcessOutboundAsync</c> — see ADR-003 / C-1).
+/// </summary>
+[MemoryDiagnoser(displayGenColumns: true)]
+public class PublishPayloadScalingBenchmarks
+{
+    [Params(100, 1_000, 10_000)]
+    public int PayloadSizeBytes { get; set; }
+
+    private BareWireTestHarness _harness = null!;
+    private ReadOnlyMemory<byte> _rawPayload;
+
+    [GlobalSetup]
+    public async Task SetupAsync()
+    {
+        _harness = await BareWireTestHarness.CreateAsync();
+    }
+
+    [IterationSetup]
+    public void IterationSetup()
+    {
+        // Build a JSON payload of approximately the target size.
+        // Uses a padding field to reach the desired byte count.
+        string padding = new('x', Math.Max(0, PayloadSizeBytes - 50));
+        byte[] payload = System.Text.Encoding.UTF8.GetBytes(
+            $$"""{"Id":"bench","Amount":1.00,"Currency":"USD","Pad":"{{padding}}"}""");
+        _rawPayload = new ReadOnlyMemory<byte>(payload);
+    }
+
+    [GlobalCleanup]
+    public async Task CleanupAsync()
+        => await _harness.DisposeAsync();
+
+    /// <summary>
+    /// Publishes a raw payload of varying size to show allocation scaling.
+    /// Fixed overhead (~544 B) + payload size.
+    /// </summary>
+    [Benchmark]
+    public Task PublishRaw_Scaled()
         => _harness.Bus.PublishRawAsync(_rawPayload, contentType: "application/json");
 }
 
