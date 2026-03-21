@@ -1,9 +1,16 @@
 var builder = DistributedApplication.CreateBuilder(args);
 
+// ── Infrastructure ──────────────────────────────────────────────────────────
+// ContainerLifetime.Session ensures fresh containers on every AppHost run —
+// no stale queues or database rows from previous sessions.
+// Change to ContainerLifetime.Persistent if you need data to survive restarts
+// (e.g. testing long-running sagas or debugging specific message sequences).
 var rabbitmq = builder.AddRabbitMQ("rabbitmq")
+    .WithLifetime(ContainerLifetime.Session)
     .WithManagementPlugin();
 
 var postgres = builder.AddPostgres("postgres")
+    .WithLifetime(ContainerLifetime.Session)
     .AddDatabase("barewiredb");
 
 builder.AddProject<Projects.BareWire_Samples_BasicPublishConsume>("basic-publish-consume")
