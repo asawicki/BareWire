@@ -134,7 +134,8 @@ builder.Services.AddBareWire(cfg =>
 // ADR-002 / Phase 4: persist OrderSagaState to a relational database.
 // Replace UseSqlite with UseSqlServer / UseNpgsql for production.
 builder.Services.AddBareWireSaga<OrderSagaState>(
-    options => options.UseSqlite(dbConnectionString));
+    options => options.UseSqlite(dbConnectionString),
+    autoCreateSchema: true);
 
 // Register the state machine and wire its message dispatcher into the consume pipeline.
 builder.Services.AddBareWireSagaStateMachine<OrderSagaStateMachine, OrderSagaState>();

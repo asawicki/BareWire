@@ -176,7 +176,8 @@ builder.Services.AddBareWire(cfg =>
 // Persist DemoSagaState to PostgreSQL via EF Core.
 // SagaDbContext is registered separately from ShowcaseDbContext.
 builder.Services.AddBareWireSaga<DemoSagaState>(
-    options => options.UseNpgsql(dbConnectionString));
+    options => options.UseNpgsql(dbConnectionString),
+    autoCreateSchema: true);
 
 // Register the state machine and wire its message dispatcher into the consume pipeline.
 builder.Services.AddBareWireSagaStateMachine<DemoSagaStateMachine, DemoSagaState>();

@@ -44,8 +44,7 @@ using BareWire.Samples.SagaOrderFlow.Saga;
 using BareWire.Samples.ServiceDefaults;
 using BareWire.Serialization.Json;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Storage;
+
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
@@ -126,7 +125,8 @@ builder.Services.AddBareWire(cfg =>
 // Persists OrderSagaState to PostgreSQL via EfCoreSagaRepository<OrderSagaState>.
 // Optimistic concurrency is enforced via the Version column.
 builder.Services.AddBareWireSaga<OrderSagaState>(
-    options => options.UseNpgsql(dbConnectionString));
+    options => options.UseNpgsql(dbConnectionString),
+    autoCreateSchema: true);
 
 // Register the state machine and wire its message dispatcher into the consume pipeline.
 builder.Services.AddBareWireSagaStateMachine<OrderSagaStateMachine, OrderSagaState>();
@@ -137,24 +137,6 @@ builder.Services.AddBareWireSagaStateMachine<OrderSagaStateMachine, OrderSagaSta
 
 WebApplication app = builder.Build();
 
-// Development only — EnsureCreated creates the schema when none exists.
-// Use EF Core migrations in production.
-// EnsureCreatedAsync is a no-op when the database already exists (e.g. created by another sample
-// sharing the same connection string). CreateTablesAsync adds missing tables for this DbContext.
-using (IServiceScope scope = app.Services.CreateScope())
-{
-    SagaDbContext sagaDb = scope.ServiceProvider.GetRequiredService<SagaDbContext>();
-    await sagaDb.Database.EnsureCreatedAsync().ConfigureAwait(false);
-    try
-    {
-        var creator = sagaDb.Database.GetInfrastructure().GetRequiredService<IRelationalDatabaseCreator>();
-        await creator.CreateTablesAsync().ConfigureAwait(false);
-    }
-    catch (Npgsql.PostgresException ex) when (ex.SqlState == "42P07")
-    {
-        // Tables already exist from a previous run — safe to ignore in development.
-    }
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 7. HTTP endpoints

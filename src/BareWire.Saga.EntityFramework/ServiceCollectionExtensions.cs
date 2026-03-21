@@ -1,6 +1,7 @@
 using BareWire.Abstractions.Saga;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 namespace BareWire.Saga.EntityFramework;
 
@@ -18,13 +19,20 @@ public static class ServiceCollectionExtensions
     /// A delegate that configures the <see cref="DbContextOptionsBuilder"/> for <see cref="SagaDbContext"/>.
     /// For example: <c>options => options.UseSqlServer(connectionString)</c>.
     /// </param>
+    /// <param name="autoCreateSchema">
+    /// When <see langword="true"/>, registers a <see cref="IHostedService"/> that automatically creates
+    /// the saga database tables at host startup using <c>IRelationalDatabaseCreator.CreateTablesAsync</c>.
+    /// Defaults to <see langword="false"/>. Enable this option only in development or controlled environments
+    /// where schema migration is managed by the application.
+    /// </param>
     /// <returns>The same <paramref name="services"/> instance for chaining.</returns>
     /// <exception cref="ArgumentNullException">
     /// Thrown when <paramref name="services"/> or <paramref name="configureDbContext"/> is <see langword="null"/>.
     /// </exception>
     public static IServiceCollection AddBareWireSaga<TSaga>(
         this IServiceCollection services,
-        Action<DbContextOptionsBuilder> configureDbContext)
+        Action<DbContextOptionsBuilder> configureDbContext,
+        bool autoCreateSchema = false)
         where TSaga : class, ISagaState
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -42,6 +50,11 @@ public static class ServiceCollectionExtensions
         // Register the EF Core repository implementations for this saga type.
         services.AddScoped<ISagaRepository<TSaga>, EfCoreSagaRepository<TSaga>>();
         services.AddScoped<IQueryableSagaRepository<TSaga>, EfCoreSagaRepository<TSaga>>();
+
+        if (autoCreateSchema)
+        {
+            services.AddHostedService<SagaSchemaInitializer>();
+        }
 
         return services;
     }
