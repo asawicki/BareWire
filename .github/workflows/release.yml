@@ -1,0 +1,66 @@
+name: Release NuGet Packages
+
+on:
+  push:
+    tags: ['v*']
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  release:
+    name: Pack & Publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', '**/Directory.Packages.props') }}
+          restore-keys: nuget-
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore
+        run: dotnet restore BareWire.slnx
+
+      - name: Build
+        run: dotnet build BareWire.slnx --no-restore -c Release /p:Version=${{ steps.version.outputs.VERSION }}
+
+      - name: Test
+        run: >-
+          dotnet test BareWire.slnx
+          --no-build
+          -c Release
+
+      - name: Pack
+        run: >-
+          dotnet pack BareWire.slnx
+          --no-build
+          -c Release
+          /p:Version=${{ steps.version.outputs.VERSION }}
+          -o ./nupkgs
+
+      - name: Push to GitHub Packages
+        run: >-
+          dotnet nuget push ./nupkgs/*.nupkg
+          --source https://nuget.pkg.github.com/asawicki/index.json
+          --api-key ${{ secrets.GITHUB_TOKEN }}
+          --skip-duplicate
+
+      - name: Push to NuGet.org
+        run: >-
+          dotnet nuget push ./nupkgs/*.nupkg
+          --source https://api.nuget.org/v3/index.json
+          --api-key ${{ secrets.NUGET_API_KEY }}
+          --skip-duplicate
