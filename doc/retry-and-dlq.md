@@ -76,6 +76,17 @@ rmq.ReceiveEndpoint("payments-dlq", e =>
 
 > See: `samples/BareWire.Samples.RetryAndDlq/`
 
+## Message Loss Protection
+
+If a queue has no Dead Letter Exchange configured and a message is rejected after retry exhaustion, it is **permanently lost**. BareWire logs a warning in this situation:
+
+```
+warn: BareWire.Pipeline.DeadLetterMiddleware
+      Message {MessageId} on endpoint {Endpoint} was NACKed but no DLX is configured — message will be permanently lost.
+```
+
+The framework detects missing DLX via `EndpointBinding.HasDeadLetterExchange`, which is set based on the declared topology. Recommendation: **always configure a DLX** on production queues to avoid silent message loss.
+
 ## Inspecting Failed Messages
 
 The RetryAndDlq sample exposes an endpoint to query persisted failures:

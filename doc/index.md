@@ -34,13 +34,14 @@ dotnet run --project samples/BareWire.Samples.AppHost/
 
 | Sample | Description |
 |---|---|
-| `BasicPublishConsume` | Publish/subscribe with PostgreSQL persistence |
+| `BasicPublishConsume` | Publish/subscribe with PostgreSQL, retry (3x) and dead letter queue |
 | `RequestResponse` | Synchronous request-response with validation |
-| `RawMessageInterop` | Interop with legacy systems via raw JSON |
-| `RabbitMQ` | Full-featured example with SAGA, outbox, observability |
-| `BackpressureDemo` | Consume-side and publish-side flow control |
-| `RetryAndDlq` | Retry policies and dead letter queue handling |
-| `SagaOrderFlow` | Complex order lifecycle with compensable activities |
-| `TransactionalOutbox` | Exactly-once delivery via transactional outbox |
-| `ObservabilityShowcase` | Distributed tracing with OpenTelemetry |
-| `MultiConsumerPartitioning` | Per-correlation ordering with partitioned consumers |
+| `RawMessageInterop` | Interop with legacy systems via raw JSON (Raw + Typed consumers) |
+| `RabbitMQ` | Orders with transactional outbox (SQLite) and publish backpressure |
+| `BackpressureDemo` | Consume-side and publish-side flow control under load |
+| `RetryAndDlq` | Retry policies, DLX routing, DLQ consumer with PostgreSQL persistence |
+| `SagaOrderFlow` | Order lifecycle saga with compensation and finalization |
+| `TransactionalOutbox` | Exactly-once delivery via transactional outbox with EF Core |
+| `InboxDeduplication` | Inbox deduplication across multiple consumers (Email + Audit) |
+| `ObservabilityShowcase` | 3-hop distributed tracing (order → payment → shipment) with OTel |
+| `MultiConsumerPartitioning` | Per-correlation ordering with 64-partition partitioner |

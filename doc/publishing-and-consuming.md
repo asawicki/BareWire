@@ -175,6 +175,52 @@ rmq.ConfigureHeaderMapping(headers =>
 
 > See: `samples/BareWire.Samples.RawMessageInterop/`
 
+## Publishing with Custom Headers
+
+The `PublishAsync` overload with a `headers` parameter lets you attach additional transport headers to the outbound message:
+
+```csharp
+var headers = new Dictionary<string, string>
+{
+    ["message-id"] = originalMessageId.ToString(),
+    ["X-Source"] = "redelivery-endpoint"
+};
+
+await bus.PublishAsync(message, headers, ct);
+```
+
+The `"message-id"` key has special meaning — when present, the framework uses the provided value as the message identifier instead of generating a new `Guid`. This enables inbox deduplication scenarios where the same logical message is re-published (e.g. broker redelivery simulation):
+
+```csharp
+// Original publish — framework generates a new MessageId
+await bus.PublishAsync(new PaymentReceived(paymentId, 100m), ct);
+
+// Re-publish with the same MessageId — inbox rejects the duplicate
+var headers = new Dictionary<string, string> { ["message-id"] = originalMsgId.ToString() };
+await bus.PublishAsync(new PaymentReceived(paymentId, 100m), headers, ct);
+```
+
+Framework headers (`BW-MessageType`, trace context) take precedence over custom headers.
+
+> See: `samples/BareWire.Samples.InboxDeduplication/Program.cs`
+
+## MessageContext.EndpointName
+
+Inside middleware, the `MessageContext.EndpointName` property contains the name of the receive endpoint (queue) processing the current message. This enables endpoint-aware logic such as routing, logging, or inbox deduplication keys:
+
+```csharp
+public sealed class AuditMiddleware : IMessageMiddleware
+{
+    public async Task InvokeAsync(MessageContext context, MessageDelegate next)
+    {
+        logger.LogInformation("Processing on endpoint {Endpoint}", context.EndpointName);
+        await next(context);
+    }
+}
+```
+
+The framework sets `EndpointName` automatically from `EndpointBinding.EndpointName` — no configuration required.
+
 ## Raw Publishing
 
 Publish raw byte payloads when you need full control over the wire format:
