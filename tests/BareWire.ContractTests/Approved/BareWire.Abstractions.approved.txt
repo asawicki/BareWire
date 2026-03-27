@@ -34,6 +34,8 @@ namespace BareWire.Abstractions
         public System.Threading.Tasks.Task<BareWire.Abstractions.ISendEndpoint> GetSendEndpoint(System.Uri address, System.Threading.CancellationToken cancellationToken = default) { }
         public System.Threading.Tasks.Task PublishAsync<T>(T message, System.Threading.CancellationToken cancellationToken = default)
             where T :  class { }
+        public System.Threading.Tasks.Task PublishAsync<T>(T message, System.Collections.Generic.IReadOnlyDictionary<string, string>? headers, System.Threading.CancellationToken cancellationToken = default)
+            where T :  class { }
         public System.Threading.Tasks.Task PublishRawAsync(System.ReadOnlyMemory<byte> payload, string contentType, System.Threading.CancellationToken cancellationToken = default) { }
         public virtual System.Threading.Tasks.Task RespondAsync<T>(T response, System.Threading.CancellationToken cancellationToken = default)
             where T :  class { }
@@ -88,6 +90,8 @@ namespace BareWire.Abstractions
     public interface IPublishEndpoint
     {
         System.Threading.Tasks.Task PublishAsync<T>(T message, System.Threading.CancellationToken cancellationToken = default)
+            where T :  class;
+        System.Threading.Tasks.Task PublishAsync<T>(T message, System.Collections.Generic.IReadOnlyDictionary<string, string>? headers, System.Threading.CancellationToken cancellationToken = default)
             where T :  class;
         System.Threading.Tasks.Task PublishRawAsync(System.ReadOnlyMemory<byte> payload, string contentType, System.Threading.CancellationToken cancellationToken = default);
     }
@@ -191,6 +195,7 @@ namespace BareWire.Abstractions.Configuration
         public EndpointBinding() { }
         public System.Collections.Generic.IReadOnlyList<BareWire.Abstractions.Configuration.ConsumerRegistration> Consumers { get; init; }
         public required string EndpointName { get; init; }
+        public bool HasDeadLetterExchange { get; init; }
         public int PrefetchCount { get; init; }
         public System.Collections.Generic.IReadOnlyList<System.Type> RawConsumers { get; init; }
         public int RetryCount { get; init; }
@@ -355,7 +360,9 @@ namespace BareWire.Abstractions.Pipeline
     public sealed class MessageContext
     {
         public MessageContext(System.Guid messageId, System.Collections.Generic.IReadOnlyDictionary<string, string> headers, System.Buffers.ReadOnlySequence<byte> rawBody, System.IServiceProvider serviceProvider, System.Threading.CancellationToken cancellationToken = default) { }
+        public MessageContext(System.Guid messageId, System.Collections.Generic.IReadOnlyDictionary<string, string> headers, System.Buffers.ReadOnlySequence<byte> rawBody, System.IServiceProvider serviceProvider, string endpointName, System.Threading.CancellationToken cancellationToken = default) { }
         public System.Threading.CancellationToken CancellationToken { get; }
+        public string EndpointName { get; }
         public System.Collections.Generic.IReadOnlyDictionary<string, string> Headers { get; }
         public System.Guid MessageId { get; }
         public System.Buffers.ReadOnlySequence<byte> RawBody { get; }

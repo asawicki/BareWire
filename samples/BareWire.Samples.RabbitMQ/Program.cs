@@ -5,18 +5,14 @@
 //   - ADR-002  Manual topology: ConfigureConsumeTopology = false (default), topology declared explicitly.
 //   - ADR-006  Publish-side back-pressure: PublishFlowControlOptions configured.
 //   - Transactional outbox (BareWire.Outbox + EF Core) for reliable message delivery.
-//   - SAGA state machine (OrderSagaStateMachine) with EF Core + SQLite persistence.
 //   - OpenTelemetry observability (traces + metrics).
 //   - Health checks exposing bus liveness at /health.
 //   - Minimal API endpoint POST /orders that publishes OrderCreated.
 //
 // Architecture:
-//   POST /orders → OrderCreated
-//       └→ OrderConsumer (queue: "orders") → OrderProcessed
-//           └→ OrderSagaStateMachine (queue: "order-saga"):
-//                  Initial ──OrderCreated──→ Processing
-//                  Processing ──PaymentReceived──→ Completed
-//                  Processing ──PaymentFailed──→ Failed
+//   POST /orders → OrderCreated → exchange:order.events (fanout) → queue:orders
+//       └→ OrderConsumer → OrderProcessed → exchange:order-processed.events (fanout)
+//   (SAGA state machine is in the separate BareWire.Samples.SagaOrderFlow sample.)
 //
 // Prerequisites (runtime, NOT required to compile):
 //   - RabbitMQ broker at amqp://guest:guest@localhost:5672/
@@ -24,16 +20,13 @@
 
 using BareWire.Abstractions;
 using BareWire.Abstractions.Configuration;
-using BareWire.Core;
+using BareWire;
 using BareWire.Transport.RabbitMQ;
 using BareWire.Samples.RabbitMQ.Models;
 using BareWire.Observability;
 using BareWire.Outbox.EntityFramework;
-using BareWire.Saga;
-using BareWire.Saga.EntityFramework;
 using BareWire.Samples.RabbitMQ.Consumers;
 using BareWire.Samples.RabbitMQ.Messages;
-using BareWire.Samples.RabbitMQ.Saga;
 using BareWire.Serialization.Json;
 using Microsoft.EntityFrameworkCore;
 
@@ -84,17 +77,19 @@ Action<IRabbitMqConfigurator> configureRabbitMq = rmq =>
     // The broker resources are deployed by IBusControl.DeployTopologyAsync on startup.
     rmq.ConfigureTopology(t =>
     {
-        // Fanout exchange — every message published to "order.events" is delivered
-        // to both consumer queues: "orders" and "order-saga".
+        // Two separate exchanges prevent a publish cycle:
+        //   "order.events"           — receives OrderCreated from the HTTP endpoint (DefaultExchange).
+        //   "order-processed.events" — receives OrderProcessed from OrderConsumer via GetSendEndpoint.
+        // Only "order.events" is bound to the "orders" queue; "order-processed.events" is intentionally
+        // left unbound here so that OrderProcessed messages do not loop back through OrderConsumer.
+        // The "order-saga" queue is managed by BareWire.Samples.SagaOrderFlow — not this sample.
         t.DeclareExchange("order.events", ExchangeType.Fanout, durable: true);
+        t.DeclareExchange("order-processed.events", ExchangeType.Fanout, durable: true);
 
-        // Queue for OrderConsumer (processes OrderCreated → publishes OrderProcessed).
+        // Queue for OrderConsumer (processes OrderCreated → sends OrderProcessed).
         t.DeclareQueue("orders", durable: true);
         t.BindExchangeToQueue("order.events", "orders", routingKey: "#");
-
-        // Queue for OrderSagaStateMachine (correlates OrderCreated / PaymentReceived / PaymentFailed).
-        t.DeclareQueue("order-saga", durable: true);
-        t.BindExchangeToQueue("order.events", "order-saga", routingKey: "#");
+        // NOTE: "order-processed.events" is NOT bound to "orders" — that is what breaks the cycle.
     });
 
     // Endpoint: OrderConsumer processes OrderCreated messages.
@@ -106,14 +101,6 @@ Action<IRabbitMqConfigurator> configureRabbitMq = rmq =>
         e.RetryCount = 3;
         e.RetryInterval = TimeSpan.FromSeconds(5);
         e.Consumer<OrderConsumer, OrderCreated>();
-    });
-
-    // Endpoint: OrderSagaStateMachine correlates events and drives the order lifecycle.
-    rmq.ReceiveEndpoint("order-saga", e =>
-    {
-        e.PrefetchCount = 8;
-        e.ConcurrentMessageLimit = 4;
-        e.StateMachineSaga<OrderSagaStateMachine>();
     });
 };
 
@@ -128,20 +115,7 @@ builder.Services.AddBareWire(cfg =>
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 4. SAGA persistence (EF Core + SQLite)
-// ─────────────────────────────────────────────────────────────────────────────
-
-// ADR-002 / Phase 4: persist OrderSagaState to a relational database.
-// Replace UseSqlite with UseSqlServer / UseNpgsql for production.
-builder.Services.AddBareWireSaga<OrderSagaState>(
-    options => options.UseSqlite(dbConnectionString),
-    autoCreateSchema: true);
-
-// Register the state machine and wire its message dispatcher into the consume pipeline.
-builder.Services.AddBareWireSagaStateMachine<OrderSagaStateMachine, OrderSagaState>();
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 5. Transactional outbox / inbox (EF Core + SQLite)
+// 4. Transactional outbox / inbox (EF Core + SQLite)
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ADR-005 / Phase 5: transactional outbox for at-least-once delivery guarantees.

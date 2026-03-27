@@ -28,7 +28,7 @@
 
 using BareWire.Abstractions;
 using BareWire.Abstractions.Configuration;
-using BareWire.Core;
+using BareWire;
 using BareWire.Transport.RabbitMQ;
 using BareWire.Outbox.EntityFramework;
 using BareWire.Samples.ServiceDefaults;

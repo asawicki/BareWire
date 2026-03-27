@@ -6,8 +6,9 @@ internal sealed class InMemoryInboxStore : IInboxStore
 {
     private readonly record struct LockKey(Guid MessageId, string ConsumerType);
 
-    // Value is the DateTimeOffset at which the lock expires.
-    private readonly ConcurrentDictionary<LockKey, DateTimeOffset> _locks = new();
+    private readonly record struct LockState(DateTimeOffset ExpiresAt, bool Processed);
+
+    private readonly ConcurrentDictionary<LockKey, LockState> _locks = new();
 
     public ValueTask<bool> TryLockAsync(
         Guid messageId,
@@ -22,18 +23,19 @@ internal sealed class InMemoryInboxStore : IInboxStore
         DateTimeOffset expiry = DateTimeOffset.UtcNow + lockTimeout;
 
         // If no entry exists, insert and acquire the lock.
-        if (_locks.TryAdd(key, expiry))
+        if (_locks.TryAdd(key, new LockState(expiry, Processed: false)))
         {
             return ValueTask.FromResult(true);
         }
 
-        // Entry exists — check if the existing lock has expired.
-        if (_locks.TryGetValue(key, out DateTimeOffset existingExpiry)
-            && existingExpiry <= DateTimeOffset.UtcNow)
+        // Entry exists — check if the existing lock has expired and was not already processed.
+        if (_locks.TryGetValue(key, out LockState existingState)
+            && existingState.ExpiresAt <= DateTimeOffset.UtcNow
+            && !existingState.Processed)
         {
-            // Expired lock: replace it with a fresh one.
+            // Expired and unprocessed lock: replace it with a fresh one.
             // Use TryUpdate to avoid a race where another thread just refreshed it.
-            if (_locks.TryUpdate(key, expiry, existingExpiry))
+            if (_locks.TryUpdate(key, new LockState(expiry, Processed: false), existingState))
             {
                 return ValueTask.FromResult(true);
             }
@@ -41,6 +43,22 @@ internal sealed class InMemoryInboxStore : IInboxStore
 
         // Active lock held by another processing attempt — this is a duplicate.
         return ValueTask.FromResult(false);
+    }
+
+    public ValueTask MarkProcessedAsync(
+        Guid messageId,
+        string consumerType,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(consumerType);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var key = new LockKey(messageId, consumerType);
+        _locks.AddOrUpdate(
+            key,
+            _ => new LockState(DateTimeOffset.UtcNow, Processed: true),
+            (_, existing) => existing with { Processed = true });
+        return ValueTask.CompletedTask;
     }
 
     public ValueTask CleanupAsync(
@@ -55,9 +73,9 @@ internal sealed class InMemoryInboxStore : IInboxStore
         // For simplicity: remove all entries whose expiry is older than (now - retention).
         DateTimeOffset cutoff = DateTimeOffset.UtcNow - retention;
 
-        foreach ((LockKey key, DateTimeOffset expiry) in _locks)
+        foreach ((LockKey key, LockState state) in _locks)
         {
-            if (expiry <= cutoff)
+            if (!state.Processed && state.ExpiresAt <= cutoff)
             {
                 _locks.TryRemove(key, out _);
             }

@@ -42,7 +42,7 @@ public sealed partial class DlqConsumer(
     [LoggerMessage(Level = LogLevel.Warning,
         Message = "DLQ: received dead-lettered payment PaymentId={PaymentId} Amount={Amount} {Currency}")]
     private static partial void LogDlqMessageReceived(
-        ILogger logger, string paymentId, decimal amount, string currency);
+        ILogger logger, string paymentId, decimal amount, string? currency);
 
     [LoggerMessage(Level = LogLevel.Information,
         Message = "DLQ: persisted failed payment PaymentId={PaymentId} with record Id={RecordId}")]

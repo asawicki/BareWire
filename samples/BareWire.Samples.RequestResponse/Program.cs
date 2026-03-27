@@ -20,7 +20,7 @@
 
 using BareWire.Abstractions;
 using BareWire.Abstractions.Configuration;
-using BareWire.Core;
+using BareWire;
 using BareWire.Transport.RabbitMQ;
 using BareWire.Observability;
 using BareWire.Samples.RequestResponse.Consumers;

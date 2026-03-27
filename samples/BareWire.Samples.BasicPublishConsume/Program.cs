@@ -3,13 +3,16 @@
 // What this sample shows:
 //   - ADR-001  Raw-first: System.Text.Json serializer, no envelope by default.
 //   - ADR-002  Manual topology: exchange and queue declared explicitly.
+//   - Retry (3 attempts) + RabbitMQ native dead-letter exchange (DLX) for poison messages.
 //   - EF Core with PostgreSQL (Npgsql) for persisting received messages.
 //   - ServiceDefaults: OpenTelemetry observability + health checks.
 //   - Minimal API endpoints: POST /messages (publish), GET /messages (query from DB).
 //
 // Architecture:
 //   POST /messages → MessageSent
-//       └→ MessageConsumer (queue: "messages") → persists to PostgreSQL
+//       └→ MessageConsumer (queue: "messages", retry: 3, DLX: "messages.dlx")
+//           ├→ success: persists to PostgreSQL
+//           └→ failure after retries: routed to "messages-dlq" via DLX
 //
 // Prerequisites (runtime, NOT required to compile):
 //   - RabbitMQ broker (default: amqp://guest:guest@localhost:5672/)
@@ -18,7 +21,7 @@
 
 using BareWire.Abstractions;
 using BareWire.Abstractions.Configuration;
-using BareWire.Core;
+using BareWire;
 using BareWire.Transport.RabbitMQ;
 using BareWire.Samples.BasicPublishConsume.Consumers;
 using BareWire.Samples.BasicPublishConsume.Data;
@@ -80,13 +83,23 @@ Action<IRabbitMqConfigurator> configureRabbitMq = rmq =>
         // Fanout exchange — every published MessageSent is delivered to the "messages" queue.
         t.DeclareExchange("messages.events", ExchangeType.Fanout, durable: true);
 
-        t.DeclareQueue("messages", durable: true);
+        // Main queue with DLX — rejected messages (after retry exhaustion) are routed to "messages.dlx".
+        t.DeclareQueue("messages", durable: true, arguments:
+            new Dictionary<string, object> { ["x-dead-letter-exchange"] = "messages.dlx" });
         t.BindExchangeToQueue("messages.events", "messages", routingKey: "#");
+
+        // Dead-letter exchange and queue — poison messages land here for manual inspection.
+        t.DeclareExchange("messages.dlx", ExchangeType.Fanout, durable: true);
+        t.DeclareQueue("messages-dlq", durable: true);
+        t.BindExchangeToQueue("messages.dlx", "messages-dlq", routingKey: "");
     });
 
     // Endpoint: MessageConsumer logs and persists every MessageSent event.
+    // Retry 3 times with 1 s interval before routing to the dead-letter queue.
     rmq.ReceiveEndpoint("messages", e =>
     {
+        e.RetryCount = 3;
+        e.RetryInterval = TimeSpan.FromSeconds(1);
         e.Consumer<MessageConsumer, MessageSent>();
     });
 };

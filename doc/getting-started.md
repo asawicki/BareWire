@@ -6,7 +6,7 @@ Add the BareWire packages to your project:
 
 ```bash
 dotnet add package BareWire.Abstractions
-dotnet add package BareWire.Core
+dotnet add package BareWire
 dotnet add package BareWire.Serialization.Json
 dotnet add package BareWire.Transport.RabbitMQ
 ```

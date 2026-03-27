@@ -71,6 +71,9 @@ public static class ServiceCollectionExtensions
                 SagaTypes = e.SagaTypes,
                 RetryCount = e.RetryCount,
                 RetryInterval = e.RetryInterval,
+                HasDeadLetterExchange = options.Topology?.Queues
+                    .FirstOrDefault(q => q.Name == e.QueueName)
+                    ?.Arguments?.ContainsKey("x-dead-letter-exchange") ?? false,
             })
             .ToList();
         services.TryAddSingleton<IReadOnlyList<EndpointBinding>>(bindings);

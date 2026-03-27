@@ -296,4 +296,89 @@ public sealed class OutboxDispatcherTests
         Func<Task> stop = () => sut.StopAsync(CancellationToken.None);
         await stop.Should().NotThrowAsync();
     }
+
+    [Fact]
+    public async Task DispatchBatchAsync_AllNacked_NoMarkDelivered_RetriesOnNextPoll()
+    {
+        // Arrange — all messages are nacked by the broker.
+        var entries = new List<OutboxEntry> { CreateEntry(1), CreateEntry(2), CreateEntry(3) };
+        int getPendingCallCount = 0;
+
+        _store
+            .GetPendingAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                getPendingCallCount++;
+                // Return entries on every poll to verify they remain pending.
+                return ValueTask.FromResult<IReadOnlyList<OutboxEntry>>(
+                    getPendingCallCount <= 2 ? entries : Array.Empty<OutboxEntry>());
+            });
+
+        _adapter
+            .SendBatchAsync(Arg.Any<IReadOnlyList<OutboundMessage>>(), Arg.Any<CancellationToken>())
+            .Returns(_ => Task.FromResult<IReadOnlyList<SendResult>>(new SendResult[]
+            {
+                new(IsConfirmed: false, DeliveryTag: 0),
+                new(IsConfirmed: false, DeliveryTag: 1),
+                new(IsConfirmed: false, DeliveryTag: 2),
+            }));
+
+        await using var sut = CreateSut();
+
+        // Act
+        await sut.StartAsync(CancellationToken.None);
+        await Task.Delay(50);
+        await sut.StopAsync(CancellationToken.None);
+
+        // Assert — MarkDeliveredAsync must never be called when all messages are nacked.
+        await _store.DidNotReceive().MarkDeliveredAsync(
+            Arg.Any<IReadOnlyList<long>>(),
+            Arg.Any<CancellationToken>());
+
+        // Adapter was called (messages were sent), but store was polled again (retry).
+        await _adapter.Received().SendBatchAsync(
+            Arg.Any<IReadOnlyList<OutboundMessage>>(),
+            Arg.Any<CancellationToken>());
+        getPendingCallCount.Should().BeGreaterThanOrEqualTo(2,
+            "the dispatcher must re-poll pending messages when none were confirmed");
+    }
+
+    [Fact]
+    public async Task DispatchBatchAsync_SendThrows_MessagesRetainedForRetry()
+    {
+        // Arrange — SendBatchAsync throws a transport exception on the first call.
+        var entries = new List<OutboxEntry> { CreateEntry(1), CreateEntry(2) };
+        int getPendingCallCount = 0;
+
+        _store
+            .GetPendingAsync(Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                getPendingCallCount++;
+                return ValueTask.FromResult<IReadOnlyList<OutboxEntry>>(
+                    getPendingCallCount <= 2 ? entries : Array.Empty<OutboxEntry>());
+            });
+
+        _adapter
+            .SendBatchAsync(Arg.Any<IReadOnlyList<OutboundMessage>>(), Arg.Any<CancellationToken>())
+            .Returns<Task<IReadOnlyList<SendResult>>>(_ =>
+                throw new BareWire.Abstractions.Exceptions.BareWireTransportException(
+                    "Connection lost", "RabbitMQ", null));
+
+        await using var sut = CreateSut();
+
+        // Act
+        await sut.StartAsync(CancellationToken.None);
+        await Task.Delay(50);
+        await sut.StopAsync(CancellationToken.None);
+
+        // Assert — MarkDeliveredAsync must never be called when send throws.
+        await _store.DidNotReceive().MarkDeliveredAsync(
+            Arg.Any<IReadOnlyList<long>>(),
+            Arg.Any<CancellationToken>());
+
+        // Store was polled multiple times — messages are retained for retry.
+        getPendingCallCount.Should().BeGreaterThanOrEqualTo(2,
+            "the dispatcher must continue polling after a transient send error");
+    }
 }

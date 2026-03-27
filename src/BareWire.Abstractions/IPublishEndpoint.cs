@@ -18,6 +18,25 @@ public interface IPublishEndpoint
         where T : class;
 
     /// <summary>
+    /// Publishes a typed message with custom transport headers.
+    /// If <paramref name="headers"/> contains a <c>"message-id"</c> key, that value is used as the
+    /// message identifier instead of generating a new one — enabling inbox deduplication scenarios
+    /// where the same logical message is re-published (e.g. broker redelivery simulation).
+    /// Framework headers (<c>BW-MessageType</c>, trace context) take precedence over custom headers.
+    /// </summary>
+    /// <typeparam name="T">The message type. Must be a reference type (typically a <c>record</c>).</typeparam>
+    /// <param name="message">The message to publish. Must not be null.</param>
+    /// <param name="headers">
+    /// Optional additional transport headers to merge into the outbound message.
+    /// Pass <see langword="null"/> to omit custom headers.
+    /// </param>
+    /// <param name="cancellationToken">A token to cancel the publish operation.</param>
+    /// <returns>A <see cref="Task"/> that completes when the message has been accepted by the transport.</returns>
+    Task PublishAsync<T>(T message, IReadOnlyDictionary<string, string>? headers,
+        CancellationToken cancellationToken = default)
+        where T : class;
+
+    /// <summary>
     /// Publishes a pre-serialized raw payload with an explicit content type to all subscribers.
     /// Use this overload when the caller controls serialization, e.g. for forwarding or bridging scenarios.
     /// </summary>

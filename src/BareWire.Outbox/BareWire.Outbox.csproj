@@ -2,7 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\BareWire.Abstractions\BareWire.Abstractions.csproj" />
-    <ProjectReference Include="..\BareWire.Core\BareWire.Core.csproj" />
+    <ProjectReference Include="..\BareWire\BareWire.csproj" />
   </ItemGroup>
 
   <ItemGroup>

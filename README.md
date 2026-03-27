@@ -17,7 +17,7 @@ An alternative to MassTransit with a fundamentally different architecture: **raw
 | Package | Description |
 |---|---|
 | `BareWire.Abstractions` | Public interfaces, zero dependencies |
-| `BareWire.Core` | Core engine, pipeline, bus implementation |
+| `BareWire` | Core engine, pipeline, bus implementation |
 | `BareWire.Serialization.Json` | JSON serializer (System.Text.Json) |
 | `BareWire.Transport.RabbitMQ` | RabbitMQ transport |
 | `BareWire.Saga` | SAGA state machine |

@@ -111,10 +111,19 @@ public abstract class ConsumeContext : IPublishEndpoint, ISendEndpointProvider
     /// Publishes a typed message to all consumers subscribed to <typeparamref name="T"/>
     /// from within this consumer handler, preserving the conversation context.
     /// </summary>
-    /// <inheritdoc cref="IPublishEndpoint.PublishAsync{T}"/>
+    /// <inheritdoc cref="IPublishEndpoint.PublishAsync{T}(T, CancellationToken)"/>
     public Task PublishAsync<T>(T message, CancellationToken cancellationToken = default)
         where T : class
         => _publishEndpoint.PublishAsync(message, cancellationToken);
+
+    /// <summary>
+    /// Publishes a typed message with custom transport headers from within this consumer handler.
+    /// </summary>
+    /// <inheritdoc cref="IPublishEndpoint.PublishAsync{T}(T, IReadOnlyDictionary{string, string}?, CancellationToken)"/>
+    public Task PublishAsync<T>(T message, IReadOnlyDictionary<string, string>? headers,
+        CancellationToken cancellationToken = default)
+        where T : class
+        => _publishEndpoint.PublishAsync(message, headers, cancellationToken);
 
     /// <summary>
     /// Publishes a raw payload from within this consumer handler.
@@ -134,7 +143,7 @@ public abstract class ConsumeContext : IPublishEndpoint, ISendEndpointProvider
     /// <summary>
     /// Sends a response message back to the originator of the current message.
     /// When a <c>ReplyTo</c> header is present, the response is delivered directly to that address.
-    /// Falls back to <see cref="PublishAsync{T}"/> for backwards compatibility when no reply address is set.
+    /// Falls back to <see cref="PublishAsync{T}(T, CancellationToken)"/> for backwards compatibility when no reply address is set.
     /// </summary>
     /// <typeparam name="T">The response message type. Must be a reference type.</typeparam>
     /// <param name="response">The response message to send.</param>

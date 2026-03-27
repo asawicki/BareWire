@@ -33,7 +33,7 @@
 using BareWire.Abstractions;
 using BareWire.Abstractions.Configuration;
 using BareWire.Abstractions.Saga;
-using BareWire.Core;
+using BareWire;
 using BareWire.Transport.RabbitMQ;
 using BareWire.Saga;
 using BareWire.Saga.EntityFramework;
@@ -182,7 +182,16 @@ app.MapGet("/orders/{id}/status", async (
 
     if (state is null)
     {
-        return Results.NotFound(new { Error = $"No saga found for order '{id}'." });
+        // Saga was finalized (completed or failed) and removed from the database.
+        // Return 200 with a terminal state instead of 404 — the absence of a row
+        // after a known order ID means the saga reached a terminal state.
+        return Results.Ok(new
+        {
+            OrderId = id,
+            CurrentState = "Finalized",
+            Message = "Saga completed and was removed from the database. "
+                      + "Use .Finalize() in production to prevent unbounded table growth.",
+        });
     }
 
     return Results.Ok(new

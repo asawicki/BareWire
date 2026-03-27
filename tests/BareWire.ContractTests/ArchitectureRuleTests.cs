@@ -14,6 +14,20 @@ namespace BareWire.ContractTests;
 /// </summary>
 public sealed class ArchitectureRuleTests
 {
+    /// <summary>
+    /// Sub-namespaces unique to the BareWire (ex-Core) assembly.
+    /// We cannot use <c>"BareWire"</c> as a blanket dependency check because NetArchTest
+    /// uses prefix matching, which would also match <c>BareWire.Abstractions.*</c>.
+    /// </summary>
+    private static readonly string[] CoreNamespaces =
+    [
+        "BareWire.Bus",
+        "BareWire.Pipeline",
+        "BareWire.FlowControl",
+        "BareWire.Configuration",
+        "BareWire.Buffers",
+    ];
+
     // -------------------------------------------------------------------------
     // Rule 1: Abstractions must NOT depend on any other BareWire package
     // -------------------------------------------------------------------------
@@ -25,7 +39,7 @@ public sealed class ArchitectureRuleTests
 
         string[] forbidden =
         [
-            "BareWire.Core",
+            .. CoreNamespaces,
             "BareWire.Transport.RabbitMQ",
             "BareWire.Observability",
             "BareWire.Saga",
@@ -53,7 +67,7 @@ public sealed class ArchitectureRuleTests
     [Fact]
     public void Core_ShouldNotDependOn_Transport()
     {
-        var assembly = typeof(BareWire.Core.ServiceCollectionExtensions).Assembly;
+        var assembly = typeof(BareWire.ServiceCollectionExtensions).Assembly;
 
         var result = Types.InAssembly(assembly)
             .ShouldNot()
@@ -71,7 +85,7 @@ public sealed class ArchitectureRuleTests
     [Fact]
     public void Core_ShouldNotDependOn_Observability()
     {
-        var assembly = typeof(BareWire.Core.ServiceCollectionExtensions).Assembly;
+        var assembly = typeof(BareWire.ServiceCollectionExtensions).Assembly;
 
         var result = Types.InAssembly(assembly)
             .ShouldNot()
@@ -91,13 +105,7 @@ public sealed class ArchitectureRuleTests
     {
         var assembly = GetAssembly("BareWire.Serialization.Json");
 
-        var resultCore = Types.InAssembly(assembly)
-            .ShouldNot()
-            .HaveDependencyOn("BareWire.Core")
-            .GetResult();
-
-        resultCore.IsSuccessful.Should().BeTrue(
-            resultCore.FailingTypeNames is { Count: > 0 } names ? names[0] : null);
+        AssertNoDependencyOnCore(assembly);
 
         var resultTransport = Types.InAssembly(assembly)
             .ShouldNot()
@@ -117,13 +125,7 @@ public sealed class ArchitectureRuleTests
     {
         var assembly = GetAssembly("BareWire.Transport.RabbitMQ");
 
-        var resultCore = Types.InAssembly(assembly)
-            .ShouldNot()
-            .HaveDependencyOn("BareWire.Core")
-            .GetResult();
-
-        resultCore.IsSuccessful.Should().BeTrue(
-            resultCore.FailingTypeNames is { Count: > 0 } names ? names[0] : null);
+        AssertNoDependencyOnCore(assembly);
 
         var resultObservability = Types.InAssembly(assembly)
             .ShouldNot()
@@ -247,13 +249,7 @@ public sealed class ArchitectureRuleTests
     {
         var assembly = typeof(BareWire.Observability.IObservabilityConfigurator).Assembly;
 
-        var resultCore = Types.InAssembly(assembly)
-            .ShouldNot()
-            .HaveDependencyOn("BareWire.Core")
-            .GetResult();
-
-        resultCore.IsSuccessful.Should().BeTrue(
-            resultCore.FailingTypeNames is { Count: > 0 } names ? names[0] : null);
+        AssertNoDependencyOnCore(assembly);
 
         var resultTransport = Types.InAssembly(assembly)
             .ShouldNot()
@@ -285,6 +281,20 @@ public sealed class ArchitectureRuleTests
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
+
+    private static void AssertNoDependencyOnCore(Assembly assembly)
+    {
+        foreach (var ns in CoreNamespaces)
+        {
+            var result = Types.InAssembly(assembly)
+                .ShouldNot()
+                .HaveDependencyOn(ns)
+                .GetResult();
+
+            result.IsSuccessful.Should().BeTrue(
+                result.FailingTypeNames is { Count: > 0 } names ? names[0] : null);
+        }
+    }
 
     private static Assembly GetAssembly(string name) => Assembly.Load(name);
 }

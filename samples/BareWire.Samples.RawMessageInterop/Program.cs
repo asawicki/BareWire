@@ -25,7 +25,7 @@
 
 using BareWire.Abstractions;
 using BareWire.Abstractions.Configuration;
-using BareWire.Core;
+using BareWire;
 using BareWire.Transport.RabbitMQ;
 using BareWire.Samples.RawMessageInterop.Consumers;
 using BareWire.Samples.RawMessageInterop.Data;

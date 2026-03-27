@@ -1,5 +1,5 @@
 using BareWire.Abstractions;
-using BareWire.Core.Bus;
+using BareWire.Bus;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using NSubstitute;

@@ -32,7 +32,7 @@
 
 using BareWire.Abstractions;
 using BareWire.Abstractions.Configuration;
-using BareWire.Core;
+using BareWire;
 using BareWire.Transport.RabbitMQ;
 using BareWire.Outbox.EntityFramework;
 using BareWire.Samples.ServiceDefaults;
@@ -183,65 +183,87 @@ app.MapServiceDefaults();
 
 // POST /payments — publish a PaymentReceived event to the bus.
 // Both EmailNotificationConsumer and AuditLogConsumer will process it (once each).
+// Returns both PaymentId and MessageId — use MessageId with /duplicate and /redeliver endpoints
+// to demonstrate inbox deduplication with the original message identity.
 app.MapPost("/payments", async (
     PaymentRequest request,
     IPublishEndpoint bus,
     CancellationToken cancellationToken) =>
 {
     string paymentId = Guid.NewGuid().ToString("N");
+    Guid messageId = Guid.NewGuid();
     DateTime now = DateTime.UtcNow;
 
+    // Pass the pre-generated message-id so the caller can reference it later.
+    var headers = new Dictionary<string, string> { ["message-id"] = messageId.ToString() };
     await bus.PublishAsync(
         new PaymentReceived(paymentId, request.Payer, request.Payee, request.Amount, now),
+        headers,
         cancellationToken).ConfigureAwait(false);
 
     return Results.Accepted(value: new
     {
         PaymentId = paymentId,
-        Note = "PaymentReceived published. Both Email and Audit consumers will process it exactly once."
+        MessageId = messageId,
+        Note = "PaymentReceived published. Both Email and Audit consumers will process it exactly once. " +
+               "Use MessageId with /duplicate or /redeliver to test inbox deduplication."
     });
 })
 .Produces(StatusCodes.Status202Accepted)
 .WithName("PublishPayment");
 
-// POST /payments/duplicate?paymentId=... — re-publish with the same PaymentId.
-// The inbox will reject processing for both consumers because entries already exist
-// for this MessageId + each ConsumerType.
+// POST /payments/duplicate?paymentId=...&messageId=... — re-publish with the original MessageId.
+// The inbox rejects processing for both consumers because entries already exist
+// for this (MessageId, ConsumerType) composite key.
 app.MapPost("/payments/duplicate", async (
     string paymentId,
+    Guid messageId,
+    decimal amount,
     IPublishEndpoint bus,
     CancellationToken cancellationToken) =>
 {
+    // Re-use the original message-id so the inbox recognises this as a duplicate.
+    var headers = new Dictionary<string, string> { ["message-id"] = messageId.ToString() };
     await bus.PublishAsync(
-        new PaymentReceived(paymentId, "Alice", "Bob", 99.99m, DateTime.UtcNow),
+        new PaymentReceived(paymentId, "Alice", "Bob", amount, DateTime.UtcNow),
+        headers,
         cancellationToken).ConfigureAwait(false);
 
     return Results.Ok(new
     {
         PaymentId = paymentId,
-        Note = "Duplicate PaymentReceived published with same PaymentId. " +
+        MessageId = messageId,
+        Amount = amount,
+        Note = $"Duplicate PaymentReceived (amount: {amount}) published with the same MessageId. " +
                "Check logs — inbox deduplication will reject both consumers."
     });
 })
 .Produces(StatusCodes.Status200OK)
 .WithName("PublishDuplicate");
 
-// POST /payments/redeliver?paymentId=... — simulates a broker redelivery scenario.
+// POST /payments/redeliver?paymentId=...&messageId=... — simulates a broker redelivery scenario.
 // In production, RabbitMQ might redeliver a message after a consumer crash or nack.
 // The inbox prevents the handler from running a second time for the same (MessageId, ConsumerType).
 app.MapPost("/payments/redeliver", async (
     string paymentId,
+    Guid messageId,
+    decimal amount,
     IPublishEndpoint bus,
     CancellationToken cancellationToken) =>
 {
+    // Re-use the original message-id to simulate a broker redelivery of the same message.
+    var headers = new Dictionary<string, string> { ["message-id"] = messageId.ToString() };
     await bus.PublishAsync(
-        new PaymentReceived(paymentId, "Alice", "Bob", 99.99m, DateTime.UtcNow),
+        new PaymentReceived(paymentId, "Alice", "Bob", amount, DateTime.UtcNow),
+        headers,
         cancellationToken).ConfigureAwait(false);
 
     return Results.Ok(new
     {
         PaymentId = paymentId,
-        Note = "Simulated redelivery with same PaymentId. " +
+        MessageId = messageId,
+        Amount = amount,
+        Note = $"Simulated redelivery (amount: {amount}) with the same MessageId. " +
                "Inbox prevents double processing — check logs for 'duplicate' entries."
     });
 })

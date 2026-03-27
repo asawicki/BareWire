@@ -2,7 +2,7 @@ using System.Buffers;
 using System.Text.Json;
 
 using BareWire.Abstractions.Serialization;
-using BareWire.Core.Buffers;
+using BareWire.Buffers;
 using BareWire.Serialization.Json;
 
 using BenchmarkDotNet.Attributes;

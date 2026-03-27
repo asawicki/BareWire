@@ -16,7 +16,7 @@
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/BareWire.Abstractions/BareWire.Abstractions.csproj" />
-    <Project Path="src/BareWire.Core/BareWire.Core.csproj" />
+    <Project Path="src/BareWire/BareWire.csproj" />
     <Project Path="src/BareWire.Observability/BareWire.Observability.csproj" />
     <Project Path="src/BareWire.Outbox.EntityFramework/BareWire.Outbox.EntityFramework.csproj" />
     <Project Path="src/BareWire.Outbox/BareWire.Outbox.csproj" />

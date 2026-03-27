@@ -2,7 +2,7 @@ using System.Buffers;
 using System.Text;
 using AwesomeAssertions;
 using BareWire.Abstractions.Exceptions;
-using BareWire.Core.Buffers;
+using BareWire.Buffers;
 using BareWire.Serialization.Json;
 
 namespace BareWire.UnitTests.Serialization;

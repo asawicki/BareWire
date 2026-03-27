@@ -43,7 +43,7 @@ public sealed class InboundMessage : IDisposable
     /// <summary>
     /// Gets the <see cref="ArrayPool{T}"/>-rented buffer backing <see cref="Body"/>, or
     /// <see langword="null"/> when the body is empty or backed by non-pooled memory.
-    /// Internal — visible only to BareWire.Core and test assemblies via InternalsVisibleTo.
+    /// Internal — visible only to BareWire and test assemblies via InternalsVisibleTo.
     /// </summary>
     internal byte[]? PooledBuffer => _pooledBuffer;
 

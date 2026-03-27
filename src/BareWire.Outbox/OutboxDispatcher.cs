@@ -1,3 +1,4 @@
+using System.Buffers;
 using BareWire.Abstractions.Transport;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -121,35 +122,46 @@ internal sealed partial class OutboxDispatcher : IHostedService, IAsyncDisposabl
                 contentType: entry.ContentType);
         }
 
-        IReadOnlyList<SendResult> results = await _adapter.SendBatchAsync(messages, ct).ConfigureAwait(false);
-
-        // Only mark entries as delivered if the broker confirmed them.
-        List<long> confirmedIds = new(pending.Count);
-        int nackedCount = 0;
-
-        for (int i = 0; i < results.Count; i++)
+        try
         {
-            if (results[i].IsConfirmed)
+            IReadOnlyList<SendResult> results = await _adapter.SendBatchAsync(messages, ct).ConfigureAwait(false);
+
+            // Only mark entries as delivered if the broker confirmed them.
+            List<long> confirmedIds = new(pending.Count);
+            int nackedCount = 0;
+
+            for (int i = 0; i < results.Count; i++)
             {
-                confirmedIds.Add(ids[i]);
+                if (results[i].IsConfirmed)
+                {
+                    confirmedIds.Add(ids[i]);
+                }
+                else
+                {
+                    nackedCount++;
+                }
             }
-            else
+
+            if (confirmedIds.Count > 0)
             {
-                nackedCount++;
+                await store.MarkDeliveredAsync(confirmedIds, ct).ConfigureAwait(false);
+            }
+
+            if (nackedCount > 0)
+            {
+                LogPartialSendFailure(_logger, nackedCount, pending.Count);
+            }
+
+            LogDispatched(_logger, confirmedIds.Count);
+        }
+        finally
+        {
+            // Return rented buffers to ArrayPool — GetPendingAsync rents them via ArrayPool.Rent().
+            for (int i = 0; i < pending.Count; i++)
+            {
+                ArrayPool<byte>.Shared.Return(pending[i].PooledBody);
             }
         }
-
-        if (confirmedIds.Count > 0)
-        {
-            await store.MarkDeliveredAsync(confirmedIds, ct).ConfigureAwait(false);
-        }
-
-        if (nackedCount > 0)
-        {
-            LogPartialSendFailure(_logger, nackedCount, pending.Count);
-        }
-
-        LogDispatched(_logger, confirmedIds.Count);
     }
 
     [LoggerMessage(

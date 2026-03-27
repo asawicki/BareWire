@@ -6,7 +6,7 @@ namespace BareWire.Abstractions.Transport;
 /// Implemented by transport adapters that maintain per-consumer channel state.
 /// </summary>
 /// <remarks>
-/// This is an internal coordination protocol between <c>BareWire.Core</c> and transport adapters.
+/// This is an internal coordination protocol between <c>BareWire</c> and transport adapters.
 /// It is not part of the public <see cref="ITransportAdapter"/> surface.
 /// <para>
 /// After a <see cref="ITransportAdapter.ConsumeAsync"/> iteration ends, the transport deliberately

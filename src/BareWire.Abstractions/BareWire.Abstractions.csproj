@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <InternalsVisibleTo Include="BareWire.Core" />
+    <InternalsVisibleTo Include="BareWire" />
     <InternalsVisibleTo Include="BareWire.Transport.RabbitMQ" />
     <InternalsVisibleTo Include="BareWire.UnitTests" />
     <InternalsVisibleTo Include="BareWire.IntegrationTests" />

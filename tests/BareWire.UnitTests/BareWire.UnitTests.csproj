@@ -12,7 +12,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\BareWire.Abstractions\BareWire.Abstractions.csproj" />
-    <ProjectReference Include="..\..\src\BareWire.Core\BareWire.Core.csproj" />
+    <ProjectReference Include="..\..\src\BareWire\BareWire.csproj" />
     <ProjectReference Include="..\..\src\BareWire.Serialization.Json\BareWire.Serialization.Json.csproj" />
     <ProjectReference Include="..\..\src\BareWire.Saga\BareWire.Saga.csproj" />
     <ProjectReference Include="..\..\src\BareWire.Saga.EntityFramework\BareWire.Saga.EntityFramework.csproj" />

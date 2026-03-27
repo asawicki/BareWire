@@ -22,6 +22,8 @@ internal sealed class InboxMessageEntityTypeConfiguration : IEntityTypeConfigura
         builder.Property(m => m.ExpiresAt)
             .IsRequired();
 
+        builder.Property(m => m.ProcessedAt);
+
         builder.HasIndex(m => m.ExpiresAt);
     }
 }

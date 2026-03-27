@@ -37,6 +37,9 @@ public sealed class MessageContext
     /// </summary>
     public IServiceProvider ServiceProvider { get; }
 
+    /// <summary>The name of the receive endpoint processing this message.</summary>
+    public string EndpointName { get; }
+
     /// <summary>
     /// Initializes a new instance of <see cref="MessageContext"/>.
     /// </summary>
@@ -59,6 +62,36 @@ public sealed class MessageContext
         Headers = headers ?? throw new ArgumentNullException(nameof(headers));
         RawBody = rawBody;
         ServiceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+        CancellationToken = cancellationToken;
+        EndpointName = string.Empty;
+    }
+
+    /// <summary>
+    /// Initializes a new instance of <see cref="MessageContext"/> with an explicit endpoint name.
+    /// </summary>
+    /// <param name="messageId">The unique identifier of the message.</param>
+    /// <param name="headers">The message headers. Must not be null.</param>
+    /// <param name="rawBody">The raw zero-copy body of the message.</param>
+    /// <param name="serviceProvider">The scoped service provider for the current message. Must not be null.</param>
+    /// <param name="endpointName">The name of the receive endpoint processing this message. Must not be null.</param>
+    /// <param name="cancellationToken">The cancellation token for this processing scope.</param>
+    /// <exception cref="ArgumentNullException">
+    /// Thrown when <paramref name="headers"/>, <paramref name="serviceProvider"/>,
+    /// or <paramref name="endpointName"/> is null.
+    /// </exception>
+    public MessageContext(
+        Guid messageId,
+        IReadOnlyDictionary<string, string> headers,
+        ReadOnlySequence<byte> rawBody,
+        IServiceProvider serviceProvider,
+        string endpointName,
+        CancellationToken cancellationToken = default)
+    {
+        MessageId = messageId;
+        Headers = headers ?? throw new ArgumentNullException(nameof(headers));
+        RawBody = rawBody;
+        ServiceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+        EndpointName = endpointName ?? throw new ArgumentNullException(nameof(endpointName));
         CancellationToken = cancellationToken;
     }
 }

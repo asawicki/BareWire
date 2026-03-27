@@ -42,10 +42,14 @@ internal sealed partial class TransactionalOutboxMiddleware : IMessageMiddleware
 
         CancellationToken ct = context.CancellationToken;
 
-        // Derive consumer type from the BW-MessageType header if present; fall back to routing key.
-        string consumerType = context.Headers.TryGetValue(MessageTypeHeader, out string? headerValue)
-            ? headerValue
-            : context.GetType().Name;
+        // Derive consumer type from EndpointName when available (unique per queue), fall back to
+        // BW-MessageType header, then to type name. Using EndpointName prevents two consumers on
+        // different queues sharing the same message type from colliding on the inbox key.
+        string consumerType = !string.IsNullOrEmpty(context.EndpointName)
+            ? context.EndpointName
+            : context.Headers.TryGetValue(MessageTypeHeader, out string? headerValue)
+                ? headerValue
+                : context.GetType().Name;
 
         // 1. Inbox deduplication check — skip processing if we already have a lock.
         bool lockAcquired = await _inboxFilter
@@ -86,6 +90,19 @@ internal sealed partial class TransactionalOutboxMiddleware : IMessageMiddleware
 
             // 6. Commit the transaction.
             scope.Complete();
+
+            // 7. Mark the inbox entry as permanently processed — prevents re-lock after ExpiresAt.
+            //    Runs in a Suppress scope to explicitly opt out of any completed ambient
+            //    TransactionScope. This is a standalone best-effort UPDATE; crash between Complete()
+            //    and here is an accepted at-least-once risk — consumers must be idempotent.
+            using (var suppressScope = new TransactionScope(
+                TransactionScopeOption.Suppress,
+                TransactionScopeAsyncFlowOption.Enabled))
+            {
+                await _inboxFilter.MarkProcessedAsync(context.MessageId, consumerType, ct)
+                    .ConfigureAwait(false);
+                suppressScope.Complete();
+            }
 
             TransactionalOutboxLogMessages.TransactionCompleted(_logger, context.MessageId);
         }

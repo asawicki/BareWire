@@ -32,7 +32,7 @@
 
 using BareWire.Abstractions;
 using BareWire.Abstractions.Configuration;
-using BareWire.Core;
+using BareWire;
 using BareWire.Transport.RabbitMQ;
 using BareWire.Samples.RetryAndDlq.Consumers;
 using BareWire.Samples.RetryAndDlq.Data;
@@ -172,6 +172,9 @@ app.MapPost("/payments", async (
     IPublishEndpoint bus,
     CancellationToken cancellationToken) =>
 {
+    if (string.IsNullOrWhiteSpace(request.Currency))
+        return Results.BadRequest(new { Error = "Currency is required." });
+
     string paymentId = Guid.NewGuid().ToString();
 
     ProcessPayment message = new(paymentId, request.Amount, request.Currency);

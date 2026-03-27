@@ -32,5 +32,7 @@ internal sealed class OutboxMessageEntityTypeConfiguration : IEntityTypeConfigur
         builder.HasIndex(m => m.MessageId);
 
         builder.HasIndex(m => m.CreatedAt);
+
+        builder.HasIndex(m => m.DeliveredAt);
     }
 }

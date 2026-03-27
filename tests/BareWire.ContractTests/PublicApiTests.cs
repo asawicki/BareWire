@@ -3,7 +3,7 @@ using PublicApiGenerator;
 using Xunit;
 
 using BareWire.Abstractions;
-using BareWire.Core;
+using BareWire;
 
 namespace BareWire.ContractTests;
 
@@ -32,13 +32,13 @@ public sealed class PublicApiTests
         var options = new ApiGeneratorOptions { IncludeAssemblyAttributes = false };
         var publicApi = assembly.GeneratePublicApi(options);
 
-        var approvedFilePath = GetApprovedFilePath("BareWire.Core");
+        var approvedFilePath = GetApprovedFilePath("BareWire");
         var approved = File.ReadAllText(approvedFilePath);
 
         publicApi.Should().Be(
             approved,
-            because: "a breaking public API change was detected in BareWire.Core — " +
-                     "if intentional, update Approved/BareWire.Core.approved.txt by running RegenerateAllBaselines");
+            because: "a breaking public API change was detected in BareWire — " +
+                     "if intentional, update Approved/BareWire.approved.txt by running RegenerateAllBaselines");
     }
 
     [Fact(Skip = "Manual — run to regenerate baselines")]
@@ -50,7 +50,7 @@ public sealed class PublicApiTests
         File.WriteAllText(GetApprovedFilePath("BareWire.Abstractions"), abstractionsApi);
 
         var coreApi = typeof(ServiceCollectionExtensions).Assembly.GeneratePublicApi(options);
-        File.WriteAllText(GetApprovedFilePath("BareWire.Core"), coreApi);
+        File.WriteAllText(GetApprovedFilePath("BareWire"), coreApi);
     }
 
     private static string GetApprovedFilePath(string assemblyName)

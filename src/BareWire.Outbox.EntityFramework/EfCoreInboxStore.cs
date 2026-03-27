@@ -52,9 +52,9 @@ internal sealed class EfCoreInboxStore : IInboxStore
                     cancellationToken)
                 .ConfigureAwait(false);
 
-            if (existing is null || existing.ExpiresAt >= now)
+            if (existing is null || existing.ExpiresAt >= now || existing.ProcessedAt is not null)
             {
-                // Not expired (or somehow missing after the constraint violation) — duplicate.
+                // Not expired, already processed, or somehow missing after the constraint violation — duplicate.
                 return false;
             }
 
@@ -68,6 +68,21 @@ internal sealed class EfCoreInboxStore : IInboxStore
 
             return true;
         }
+    }
+
+    public async ValueTask MarkProcessedAsync(
+        Guid messageId,
+        string consumerType,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(consumerType);
+
+        await _dbContext.Set<InboxMessage>()
+            .Where(m => m.MessageId == messageId && m.ConsumerType == consumerType)
+            .ExecuteUpdateAsync(
+                s => s.SetProperty(m => m.ProcessedAt, DateTimeOffset.UtcNow),
+                cancellationToken)
+            .ConfigureAwait(false);
     }
 
     public async ValueTask CleanupAsync(

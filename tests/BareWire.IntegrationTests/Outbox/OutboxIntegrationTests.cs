@@ -117,6 +117,170 @@ public sealed class EfCoreOutboxStoreTests : IAsyncLifetime
         ReturnPooledBuffers(remaining);
     }
 
+    // -----------------------------------------------------------------------
+    // Bug-reproduction tests (Krok 1 of 10.1 plan)
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Reproduces the bug: after <c>MarkDeliveredAsync</c> the next poll must not
+    /// return the same messages.
+    /// </summary>
+    /// <remarks>
+    /// This test is expected to be RED initially — it reproduces the bug where
+    /// <c>ExecuteUpdateAsync</c> with <c>IReadOnlyList&lt;long&gt;.Contains()</c>
+    /// produces a no-op SQL or is otherwise not applied, causing the dispatcher
+    /// to re-publish the same outbox records indefinitely.
+    /// </remarks>
+    [Fact]
+    public async Task MarkDeliveredAsync_AfterGetPending_MessagesNotReturnedOnNextPoll()
+    {
+        // Arrange — add 3 OutboxMessage entities directly via DbContext
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+
+        _dbContext.OutboxMessages.Add(new OutboxMessage
+        {
+            MessageId = Guid.NewGuid(),
+            DestinationAddress = "orders.created",
+            ContentType = "application/json",
+            Payload = [1, 2, 3],
+            CreatedAt = now
+        });
+        _dbContext.OutboxMessages.Add(new OutboxMessage
+        {
+            MessageId = Guid.NewGuid(),
+            DestinationAddress = "orders.updated",
+            ContentType = "application/json",
+            Payload = [4, 5, 6],
+            CreatedAt = now
+        });
+        _dbContext.OutboxMessages.Add(new OutboxMessage
+        {
+            MessageId = Guid.NewGuid(),
+            DestinationAddress = "orders.completed",
+            ContentType = "application/json",
+            Payload = [7, 8, 9],
+            CreatedAt = now
+        });
+
+        await _dbContext.SaveChangesAsync(CancellationToken.None);
+
+        // Act — first poll: should return all 3
+        IReadOnlyList<OutboxEntry> firstPoll = await _store.GetPendingAsync(10, CancellationToken.None);
+        firstPoll.Should().HaveCount(3);
+
+        long[] ids = [firstPoll[0].Id, firstPoll[1].Id, firstPoll[2].Id];
+        ReturnPooledBuffers(firstPoll);
+
+        // Act — mark all as delivered
+        await _store.MarkDeliveredAsync(ids, CancellationToken.None);
+
+        // Act — second poll: should return 0 (bug: returns 3 again)
+        IReadOnlyList<OutboxEntry> secondPoll = await _store.GetPendingAsync(10, CancellationToken.None);
+
+        // Assert
+        secondPoll.Should().BeEmpty("all messages were marked as delivered and must not appear in the next poll");
+
+        ReturnPooledBuffers(secondPoll);
+    }
+
+    [Fact]
+    public async Task GetPendingAsync_OnlyReturnsPending_SkipsDelivered()
+    {
+        // Arrange — add 3 OutboxMessage entities; pre-deliver one of them
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+
+        _dbContext.OutboxMessages.Add(new OutboxMessage
+        {
+            MessageId = Guid.NewGuid(),
+            DestinationAddress = "orders.a",
+            ContentType = "application/json",
+            Payload = [1],
+            CreatedAt = now
+        });
+        _dbContext.OutboxMessages.Add(new OutboxMessage
+        {
+            MessageId = Guid.NewGuid(),
+            DestinationAddress = "orders.b",
+            ContentType = "application/json",
+            Payload = [2],
+            CreatedAt = now,
+            DeliveredAt = now  // already delivered
+        });
+        _dbContext.OutboxMessages.Add(new OutboxMessage
+        {
+            MessageId = Guid.NewGuid(),
+            DestinationAddress = "orders.c",
+            ContentType = "application/json",
+            Payload = [3],
+            CreatedAt = now
+        });
+
+        await _dbContext.SaveChangesAsync(CancellationToken.None);
+
+        // Act
+        IReadOnlyList<OutboxEntry> pending = await _store.GetPendingAsync(10, CancellationToken.None);
+
+        // Assert — only the 2 undelivered messages should be returned
+        pending.Should().HaveCount(2);
+        pending.Should().NotContain(e => e.RoutingKey == "orders.b", "delivered messages must be excluded from the poll");
+
+        ReturnPooledBuffers(pending);
+    }
+
+    [Fact]
+    public async Task MarkDeliveredAsync_PartialIds_OnlyMarksSpecified()
+    {
+        // Arrange — add 3 OutboxMessage entities
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+
+        _dbContext.OutboxMessages.Add(new OutboxMessage
+        {
+            MessageId = Guid.NewGuid(),
+            DestinationAddress = "cmd.a",
+            ContentType = "application/json",
+            Payload = [1],
+            CreatedAt = now
+        });
+        _dbContext.OutboxMessages.Add(new OutboxMessage
+        {
+            MessageId = Guid.NewGuid(),
+            DestinationAddress = "cmd.b",
+            ContentType = "application/json",
+            Payload = [2],
+            CreatedAt = now
+        });
+        _dbContext.OutboxMessages.Add(new OutboxMessage
+        {
+            MessageId = Guid.NewGuid(),
+            DestinationAddress = "cmd.c",
+            ContentType = "application/json",
+            Payload = [3],
+            CreatedAt = now
+        });
+
+        await _dbContext.SaveChangesAsync(CancellationToken.None);
+
+        // Identify IDs — load them in order so we can mark only the first and third
+        IReadOnlyList<OutboxEntry> allPending = await _store.GetPendingAsync(10, CancellationToken.None);
+        allPending.Should().HaveCount(3);
+
+        long id1 = allPending[0].Id;
+        string remainingRoutingKey = allPending[1].RoutingKey;
+        long id3 = allPending[2].Id;
+        ReturnPooledBuffers(allPending);
+
+        // Act — mark only id1 and id3 as delivered
+        await _store.MarkDeliveredAsync([id1, id3], CancellationToken.None);
+
+        // Assert — only the middle message (id2) should remain pending
+        IReadOnlyList<OutboxEntry> remaining = await _store.GetPendingAsync(10, CancellationToken.None);
+
+        remaining.Should().HaveCount(1);
+        remaining[0].RoutingKey.Should().Be(remainingRoutingKey, "only the undelivered message must remain in the pending queue");
+
+        ReturnPooledBuffers(remaining);
+    }
+
     [Fact(Skip = "ExecuteDeleteAsync with subquery patterns is not supported by the SQLite EF Core provider. Run against SQL Server or PostgreSQL.")]
     public async Task EfCoreOutboxStore_Cleanup_RemovesDeliveredOlderThanRetention()
     {
@@ -256,6 +420,33 @@ public sealed class EfCoreInboxStoreTests : IAsyncLifetime
 
         // Assert
         reacquired.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task EfCoreInboxStore_ProcessedEntry_CannotBeRelocked()
+    {
+        // Arrange
+        Guid messageId = Guid.NewGuid();
+        const string consumerType = "AuditConsumer";
+
+        // First lock — succeeds
+        bool first = await _store.TryLockAsync(messageId, consumerType, TimeSpan.FromMinutes(5), CancellationToken.None);
+        first.Should().BeTrue();
+
+        // Backdate ExpiresAt AND set ProcessedAt via raw SQL — simulates a successfully processed message
+        // whose lock has since expired. The inbox must still deny re-lock because ProcessedAt is set.
+        DateTimeOffset expiredTime = DateTimeOffset.UtcNow - TimeSpan.FromSeconds(1);
+        DateTimeOffset processedTime = DateTimeOffset.UtcNow;
+        await _dbContext.Database.ExecuteSqlAsync(
+            $"UPDATE InboxMessages SET ExpiresAt = {expiredTime:O}, ProcessedAt = {processedTime:O} WHERE MessageId = {messageId} AND ConsumerType = {consumerType}");
+
+        _dbContext.ChangeTracker.Clear();
+
+        // Act — attempt to re-lock an expired but already-processed entry
+        bool relocked = await _store.TryLockAsync(messageId, consumerType, TimeSpan.FromMinutes(5), CancellationToken.None);
+
+        // Assert — must be denied: processed entries are permanently locked
+        relocked.Should().BeFalse("a processed inbox entry must never be re-locked even after its lock expires");
     }
 
     [Fact(Skip = "ExecuteDeleteAsync with subquery patterns is not supported by the SQLite EF Core provider. Run against SQL Server or PostgreSQL.")]
@@ -447,6 +638,65 @@ public sealed class TransactionalOutboxMiddlewareTests : IAsyncLifetime
 
         pending.Should().HaveCount(1, "only the first invocation should have produced an outbox record");
         ReturnPooledBuffers(pending);
+    }
+
+    [Fact]
+    public async Task TransactionalOutbox_TwoConsumersSameMessageType_BothProcessed()
+    {
+        // Arrange — two endpoints consuming the same message type but bound to different queues.
+        // They produce separate inbox keys because EndpointName differs.
+        Guid messageId = Guid.NewGuid();
+        IServiceProvider sp = Substitute.For<IServiceProvider>();
+        var headers = new Dictionary<string, string> { ["BW-MessageType"] = "OrderCreated" };
+
+        int handlerCallCount = 0;
+
+        NextMiddleware handler = ctx =>
+        {
+            handlerCallCount++;
+            return Task.CompletedTask;
+        };
+
+        // First consumer: payment-email endpoint
+        var context1 = new MessageContext(messageId, headers, ReadOnlySequence<byte>.Empty, sp, endpointName: "payment-email");
+        await _middleware.InvokeAsync(context1, handler);
+
+        // Recreate DbContext between invocations — same pattern as TransactionalOutbox_DuplicateMessageId_SkippedByInbox
+        await _dbContext.DisposeAsync();
+        _dbContext = CreateDbContext();
+        RebuildComponents();
+
+        // Second consumer: payment-audit endpoint — same MessageId, same BW-MessageType, different EndpointName
+        var context2 = new MessageContext(messageId, headers, ReadOnlySequence<byte>.Empty, sp, endpointName: "payment-audit");
+        await _middleware.InvokeAsync(context2, handler);
+
+        // Assert — both handlers should have run because (MessageId, EndpointName) is distinct per consumer
+        handlerCallCount.Should().Be(2, "different endpoints produce different inbox keys even for the same MessageId");
+    }
+
+    [Fact]
+    public async Task TransactionalOutbox_AfterSuccessfulProcessing_MarksProcessed()
+    {
+        // Arrange
+        Guid messageId = Guid.NewGuid();
+        IServiceProvider sp = Substitute.For<IServiceProvider>();
+        var headers = new Dictionary<string, string> { ["BW-MessageType"] = "OrderCreated" };
+        var context = new MessageContext(messageId, headers, ReadOnlySequence<byte>.Empty, sp, endpointName: "payment-email");
+
+        NextMiddleware handler = ctx => Task.CompletedTask;
+
+        // Act
+        await _middleware.InvokeAsync(context, handler);
+
+        // Assert — query InboxMessages directly; InboxMessage is internal but InternalsVisibleTo is set
+        _dbContext.ChangeTracker.Clear();
+
+        InboxMessage? entry = await _dbContext.InboxMessages
+            .AsNoTracking()
+            .FirstOrDefaultAsync(m => m.MessageId == messageId && m.ConsumerType == "payment-email");
+
+        entry.Should().NotBeNull("the middleware must record an inbox entry after successful processing");
+        entry!.ProcessedAt.Should().NotBeNull("successful processing must set ProcessedAt to a non-null timestamp");
     }
 
     [Fact]

@@ -15,8 +15,8 @@ public sealed class FailedPayment
     /// <summary>Gets or sets the payment amount.</summary>
     public decimal Amount { get; set; }
 
-    /// <summary>Gets or sets the ISO 4217 currency code (e.g. <c>USD</c>).</summary>
-    public required string Currency { get; set; }
+    /// <summary>Gets or sets the ISO 4217 currency code (e.g. <c>USD</c>), or null if not provided.</summary>
+    public string? Currency { get; set; }
 
     /// <summary>Gets or sets the error message that caused the failure.</summary>
     public required string Error { get; set; }

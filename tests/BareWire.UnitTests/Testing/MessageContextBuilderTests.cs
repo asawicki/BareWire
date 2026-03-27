@@ -229,4 +229,29 @@ public sealed class MessageContextBuilderTests
 
         context.CancellationToken.Should().Be(cts.Token);
     }
+
+    [Fact]
+    public void MessageContextBuilder_WithEndpointName_SetsProperty()
+    {
+        // Act
+        MessageContext context = MessageContextBuilder
+            .Create()
+            .WithEndpointName("my-endpoint")
+            .BuildMessageContext();
+
+        // Assert
+        context.EndpointName.Should().Be("my-endpoint");
+    }
+
+    [Fact]
+    public void MessageContextBuilder_Default_SetsEmptyEndpointName()
+    {
+        // Act
+        MessageContext context = MessageContextBuilder
+            .Create()
+            .BuildMessageContext();
+
+        // Assert
+        context.EndpointName.Should().BeEmpty();
+    }
 }

@@ -144,6 +144,11 @@ public class SagaBenchmarks
             where T : class
             => Task.CompletedTask;
 
+        public Task PublishAsync<T>(T message, IReadOnlyDictionary<string, string>? headers,
+            CancellationToken cancellationToken = default)
+            where T : class
+            => Task.CompletedTask;
+
         public Task PublishRawAsync(ReadOnlyMemory<byte> payload, string contentType,
             CancellationToken cancellationToken = default)
             => Task.CompletedTask;

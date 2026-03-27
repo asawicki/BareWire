@@ -1,4 +1,6 @@
 using AwesomeAssertions;
+using BareWire.Abstractions;
+using BareWire.Abstractions.Configuration;
 using BareWire.Abstractions.Transport;
 using BareWire.Transport.RabbitMQ;
 using Microsoft.Extensions.DependencyInjection;
@@ -48,7 +50,7 @@ public sealed class RabbitMqServiceCollectionExtensionsTests
     public void AddBareWireRabbitMq_NullServices_ThrowsArgumentNullException()
     {
         // Act
-        Action act = () => ServiceCollectionExtensions.AddBareWireRabbitMq(null!, _ => { });
+        Action act = () => BareWire.Transport.RabbitMQ.ServiceCollectionExtensions.AddBareWireRabbitMq(null!, _ => { });
 
         // Assert
         act.Should().Throw<ArgumentNullException>()
@@ -67,5 +69,98 @@ public sealed class RabbitMqServiceCollectionExtensionsTests
         // Assert
         act.Should().Throw<ArgumentNullException>()
             .Which.ParamName.Should().Be("configure");
+    }
+
+    [Fact]
+    public void AddBareWireRabbitMq_QueueWithDlx_SetsHasDeadLetterExchange()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+        services.AddLogging();
+
+        // Act
+        services.AddBareWireRabbitMq(rmq =>
+        {
+            rmq.Host("amqp://guest:guest@localhost:5672/");
+            rmq.ConfigureTopology(t =>
+            {
+                t.DeclareExchange("events", ExchangeType.Fanout, durable: true);
+                t.DeclareQueue("orders", durable: true, arguments:
+                    new Dictionary<string, object> { ["x-dead-letter-exchange"] = "orders.dlx" });
+                t.BindExchangeToQueue("events", "orders", routingKey: "#");
+            });
+            rmq.ReceiveEndpoint("orders", e =>
+            {
+                e.Consumer<DummyConsumer, DummyMessage>();
+            });
+        });
+
+        // Assert
+        using var provider = services.BuildServiceProvider();
+        var bindings = provider.GetRequiredService<IReadOnlyList<EndpointBinding>>();
+        bindings.Should().ContainSingle()
+            .Which.HasDeadLetterExchange.Should().BeTrue();
+    }
+
+    [Fact]
+    public void AddBareWireRabbitMq_QueueWithoutDlx_HasDeadLetterExchangeIsFalse()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+        services.AddLogging();
+
+        // Act
+        services.AddBareWireRabbitMq(rmq =>
+        {
+            rmq.Host("amqp://guest:guest@localhost:5672/");
+            rmq.ConfigureTopology(t =>
+            {
+                t.DeclareExchange("events", ExchangeType.Fanout, durable: true);
+                t.DeclareQueue("orders", durable: true);
+                t.BindExchangeToQueue("events", "orders", routingKey: "#");
+            });
+            rmq.ReceiveEndpoint("orders", e =>
+            {
+                e.Consumer<DummyConsumer, DummyMessage>();
+            });
+        });
+
+        // Assert
+        using var provider = services.BuildServiceProvider();
+        var bindings = provider.GetRequiredService<IReadOnlyList<EndpointBinding>>();
+        bindings.Should().ContainSingle()
+            .Which.HasDeadLetterExchange.Should().BeFalse();
+    }
+
+    [Fact]
+    public void AddBareWireRabbitMq_NoTopologyConfigured_HasDeadLetterExchangeIsFalse()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+        services.AddLogging();
+
+        // Act
+        services.AddBareWireRabbitMq(rmq =>
+        {
+            rmq.Host("amqp://guest:guest@localhost:5672/");
+            rmq.ReceiveEndpoint("orders", e =>
+            {
+                e.Consumer<DummyConsumer, DummyMessage>();
+            });
+        });
+
+        // Assert
+        using var provider = services.BuildServiceProvider();
+        var bindings = provider.GetRequiredService<IReadOnlyList<EndpointBinding>>();
+        bindings.Should().ContainSingle()
+            .Which.HasDeadLetterExchange.Should().BeFalse();
+    }
+
+    private sealed record DummyMessage(string Id);
+
+    private sealed class DummyConsumer : BareWire.Abstractions.IConsumer<DummyMessage>
+    {
+        public Task ConsumeAsync(BareWire.Abstractions.ConsumeContext<DummyMessage> context)
+            => Task.CompletedTask;
     }
 }

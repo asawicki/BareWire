@@ -33,6 +33,15 @@ internal sealed partial class InboxFilter
 
         return acquired;
     }
+
+    internal async ValueTask MarkProcessedAsync(
+        Guid messageId,
+        string consumerType,
+        CancellationToken cancellationToken = default)
+    {
+        await _store.MarkProcessedAsync(messageId, consumerType, cancellationToken)
+            .ConfigureAwait(false);
+    }
 }
 
 internal static partial class InboxFilterLogMessages

@@ -41,6 +41,7 @@ public sealed partial class TransferConsumer(
         if (transfer is not null)
         {
             transfer.Status = "Completed";
+            await dbContext.SaveChangesAsync(context.CancellationToken).ConfigureAwait(false);
             LogTransferCompleted(logger, message.TransferId);
         }
         else

@@ -34,6 +34,7 @@ public sealed class MessageContextBuilder
     private IPublishEndpoint? _publishEndpoint;
     private ISendEndpointProvider? _sendEndpointProvider;
     private IServiceProvider? _serviceProvider;
+    private string _endpointName = string.Empty;
 
     private MessageContextBuilder() { }
 
@@ -170,6 +171,16 @@ public sealed class MessageContextBuilder
     }
 
     /// <summary>
+    /// Sets the endpoint name that identifies the receive endpoint processing the message.
+    /// </summary>
+    public MessageContextBuilder WithEndpointName(string endpointName)
+    {
+        ArgumentNullException.ThrowIfNull(endpointName);
+        _endpointName = endpointName;
+        return this;
+    }
+
+    /// <summary>
     /// Builds a strongly-typed <see cref="ConsumeContext{T}"/> carrying <paramref name="message"/>
     /// as the deserialized payload.
     /// </summary>
@@ -213,6 +224,7 @@ public sealed class MessageContextBuilder
             headers: _headers,
             rawBody: _rawBody,
             serviceProvider: serviceProvider,
+            endpointName: _endpointName,
             cancellationToken: _cancellationToken);
     }
 }
