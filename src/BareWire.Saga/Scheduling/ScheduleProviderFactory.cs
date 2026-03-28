@@ -1,4 +1,5 @@
 using BareWire.Abstractions;
+using BareWire.Abstractions.Serialization;
 using BareWire.Abstractions.Transport;
 using Microsoft.Extensions.Logging;
 
@@ -9,16 +10,18 @@ internal static class ScheduleProviderFactory
     internal static IScheduleProvider Create(
         SchedulingStrategy strategy,
         ITransportAdapter transport,
-        ILoggerFactory loggerFactory)
+        ILoggerFactory loggerFactory,
+        IMessageSerializer serializer)
     {
         ArgumentNullException.ThrowIfNull(transport);
         ArgumentNullException.ThrowIfNull(loggerFactory);
+        ArgumentNullException.ThrowIfNull(serializer);
 
         return strategy switch
         {
-            SchedulingStrategy.Auto => ResolveAuto(transport, loggerFactory),
+            SchedulingStrategy.Auto => ResolveAuto(transport, serializer, loggerFactory),
             SchedulingStrategy.DelayRequeue => new DelayRequeueScheduleProvider(
-                transport, loggerFactory.CreateLogger<DelayRequeueScheduleProvider>()),
+                transport, serializer, loggerFactory.CreateLogger<DelayRequeueScheduleProvider>()),
             SchedulingStrategy.TransportNative => throw new NotSupportedException(
                 "Transport-native scheduling is not yet implemented."),
             SchedulingStrategy.DelayTopic => throw new NotSupportedException(
@@ -30,12 +33,15 @@ internal static class ScheduleProviderFactory
         };
     }
 
-    private static DelayRequeueScheduleProvider ResolveAuto(ITransportAdapter transport, ILoggerFactory loggerFactory)
+    private static DelayRequeueScheduleProvider ResolveAuto(
+        ITransportAdapter transport,
+        IMessageSerializer serializer,
+        ILoggerFactory loggerFactory)
     {
         // For now, Auto always resolves to DelayRequeue — the only fully implemented strategy.
         // Future: inspect transport.TransportName to select the optimal strategy per transport
         // (e.g. TransportNative for RabbitMQ delayed message plugin, TransportNative for ASB).
         return new DelayRequeueScheduleProvider(
-            transport, loggerFactory.CreateLogger<DelayRequeueScheduleProvider>());
+            transport, serializer, loggerFactory.CreateLogger<DelayRequeueScheduleProvider>());
     }
 }

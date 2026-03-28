@@ -45,9 +45,13 @@ internal sealed class EventActivityBuilder<TSaga, TEvent> : IEventActivityBuilde
 
     /// <summary>
     /// Schedules a timeout using a <see cref="ScheduleHandle{T}"/> for delay and strategy configuration.
-    /// This internal overload is called by the state machine runtime when a handle is available.
     /// </summary>
-    internal IEventActivityBuilder<TSaga, TEvent> ScheduleTimeout<T>(
+    /// <remarks>
+    /// This overload uses the delay and strategy from the provided <see cref="ScheduleHandle{T}"/>,
+    /// which is the preferred overload when a schedule handle is available from
+    /// <see cref="BareWireStateMachine{TSaga}.Schedule{T}"/>.
+    /// </remarks>
+    public IEventActivityBuilder<TSaga, TEvent> ScheduleTimeout<T>(
         Func<TSaga, TEvent, T> factory,
         ScheduleHandle<T> schedule)
         where T : class
@@ -60,10 +64,9 @@ internal sealed class EventActivityBuilder<TSaga, TEvent> : IEventActivityBuilde
 
     /// <inheritdoc/>
     /// <remarks>
-    /// This overload satisfies the <see cref="IEventActivityBuilder{TSaga,TEvent}"/> interface contract.
-    /// Because the delay and strategy come from the <see cref="ScheduleHandle{T}"/>, callers should
-    /// prefer the internal <c>ScheduleTimeout(factory, handle)</c> overload. This overload uses a
-    /// zero delay and <see cref="SchedulingStrategy.Auto"/> as defaults.
+    /// This overload uses <see cref="TimeSpan.Zero"/> delay and <see cref="SchedulingStrategy.Auto"/>
+    /// as defaults. Prefer <see cref="ScheduleTimeout{T}(Func{TSaga,TEvent,T},ScheduleHandle{T})"/>
+    /// when a schedule handle from <see cref="BareWireStateMachine{TSaga}.Schedule{T}"/> is available.
     /// </remarks>
     public IEventActivityBuilder<TSaga, TEvent> ScheduleTimeout<T>(Func<TSaga, TEvent, T> factory)
         where T : class

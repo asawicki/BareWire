@@ -57,6 +57,16 @@ public interface IEventActivityBuilder<TSaga, TEvent>
         where T : class;
 
     /// <summary>
+    /// Schedules a timeout message using the delay and strategy from the given <see cref="ScheduleHandle{T}"/>.
+    /// </summary>
+    /// <typeparam name="T">The type of the timeout message.</typeparam>
+    /// <param name="factory">A delegate that creates the timeout message.</param>
+    /// <param name="schedule">The schedule handle returned by <see cref="BareWireStateMachine{TSaga}.Schedule{T}"/>.</param>
+    /// <returns>The same builder instance for method chaining.</returns>
+    IEventActivityBuilder<TSaga, TEvent> ScheduleTimeout<T>(Func<TSaga, TEvent, T> factory, ScheduleHandle<T> schedule)
+        where T : class;
+
+    /// <summary>
     /// Cancels a previously scheduled timeout message of the given type.
     /// </summary>
     /// <typeparam name="T">The type of the timeout message to cancel.</typeparam>

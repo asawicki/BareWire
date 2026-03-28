@@ -1,3 +1,7 @@
+using System.Buffers;
+using System.Collections.Concurrent;
+using BareWire.Abstractions.Serialization;
+using BareWire.Abstractions.Topology;
 using BareWire.Abstractions.Transport;
 using Microsoft.Extensions.Logging;
 
@@ -6,15 +10,20 @@ namespace BareWire.Saga.Scheduling;
 internal sealed partial class DelayRequeueScheduleProvider : IScheduleProvider
 {
     private readonly ITransportAdapter _transport;
+    private readonly IMessageSerializer _serializer;
     private readonly ILogger<DelayRequeueScheduleProvider> _logger;
+    private readonly ConcurrentDictionary<string, bool> _declaredQueues = new();
 
     internal DelayRequeueScheduleProvider(
         ITransportAdapter transport,
+        IMessageSerializer serializer,
         ILogger<DelayRequeueScheduleProvider> logger)
     {
         ArgumentNullException.ThrowIfNull(transport);
+        ArgumentNullException.ThrowIfNull(serializer);
         ArgumentNullException.ThrowIfNull(logger);
         _transport = transport;
+        _serializer = serializer;
         _logger = logger;
     }
 
@@ -37,12 +46,56 @@ internal sealed partial class DelayRequeueScheduleProvider : IScheduleProvider
         // guarantees correct expiration semantics. See plan section 9 (TTL gotcha decision).
         LogScheduling(_logger, typeof(T).Name, ttlMs, delayQueueName, destinationQueue);
 
-        // TODO: When ITransportAdapter supports queue declaration with arguments,
-        // declare the delay queue with x-message-ttl={ttlMs} and
-        // x-dead-letter-exchange + x-dead-letter-routing-key pointing to destinationQueue,
-        // then publish the serialized message to that delay queue.
-        // The broker will automatically dead-letter the message to destinationQueue after TTL.
-        await Task.CompletedTask.ConfigureAwait(false);
+        // Deploy delay queue only if not yet declared in this process lifetime.
+        // ConcurrentDictionary.TryAdd returns true only for the first caller — subsequent
+        // callers skip the DeployTopologyAsync call, avoiding redundant broker round-trips.
+        if (_declaredQueues.TryAdd(delayQueueName, true))
+        {
+            var topology = new TopologyDeclaration
+            {
+                Queues =
+                [
+                    new QueueDeclaration(
+                        Name: delayQueueName,
+                        Durable: true,
+                        AutoDelete: false,
+                        Arguments: new Dictionary<string, object>
+                        {
+                            ["x-message-ttl"] = ttlMs,
+                            ["x-dead-letter-exchange"] = "",
+                            ["x-dead-letter-routing-key"] = destinationQueue
+                        })
+                ]
+            };
+
+            await _transport.DeployTopologyAsync(topology, cancellationToken).ConfigureAwait(false);
+        }
+
+        // Serialize message. This is not a hot path — ArrayBufferWriter<byte> allocation is acceptable.
+        var writer = new ArrayBufferWriter<byte>();
+        _serializer.Serialize(message, writer);
+        ReadOnlyMemory<byte> body = writer.WrittenMemory.ToArray();
+
+        var outbound = new OutboundMessage(
+            routingKey: delayQueueName,
+            headers: new Dictionary<string, string>
+            {
+                ["BW-Exchange"] = "",
+                ["BW-MessageType"] = typeof(T).Name,
+                ["message-id"] = Guid.NewGuid().ToString()
+            },
+            body: body,
+            contentType: _serializer.ContentType);
+
+        IReadOnlyList<SendResult> results = await _transport.SendBatchAsync([outbound], cancellationToken)
+            .ConfigureAwait(false);
+
+        if (results.Count > 0 && !results[0].IsConfirmed)
+        {
+            throw new InvalidOperationException(
+                $"Broker did not confirm scheduled message for queue '{delayQueueName}'. " +
+                "The timeout message may not be delivered.");
+        }
     }
 
     public Task CancelAsync<T>(Guid correlationId, CancellationToken cancellationToken = default)

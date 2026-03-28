@@ -2,6 +2,8 @@ using System.Transactions;
 using BareWire.Abstractions.Pipeline;
 using Microsoft.Extensions.Logging;
 
+using static BareWire.Abstractions.Pipeline.WellKnownItemKeys;
+
 namespace BareWire.Outbox.EntityFramework;
 
 internal sealed partial class TransactionalOutboxMiddleware : IMessageMiddleware
@@ -59,6 +61,7 @@ internal sealed partial class TransactionalOutboxMiddleware : IMessageMiddleware
         if (!lockAcquired)
         {
             TransactionalOutboxLogMessages.DuplicateMessageSkipped(_logger, context.MessageId);
+            context.Items[InboxFiltered] = true;
             return;
         }
 

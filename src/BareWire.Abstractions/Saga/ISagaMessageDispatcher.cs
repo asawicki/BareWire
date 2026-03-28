@@ -26,9 +26,10 @@ public interface ISagaMessageDispatcher
     /// <param name="body">The raw inbound message body from the transport.</param>
     /// <param name="headers">The transport-level and application-level message headers.</param>
     /// <param name="messageId">The transport message identifier, used for correlation tracing.</param>
+    /// <param name="endpointName">The name of the receive endpoint that received the message, used for scheduling timeout callbacks.</param>
     /// <param name="publishEndpoint">The publish endpoint available during saga activity execution.</param>
     /// <param name="sendEndpointProvider">The send endpoint provider available during saga activity execution.</param>
-    /// <param name="deserializer">The message deserializer to use when decoding the message body.</param>
+    /// <param name="deserializerResolver">The deserializer resolver used to select the appropriate deserializer based on the message content type.</param>
     /// <param name="cancellationToken">A token to cancel the dispatch operation.</param>
     /// <returns>
     /// <see langword="true"/> if the message was successfully dispatched to the saga;
@@ -38,8 +39,9 @@ public interface ISagaMessageDispatcher
         ReadOnlySequence<byte> body,
         IReadOnlyDictionary<string, string> headers,
         string messageId,
+        string endpointName,
         IPublishEndpoint publishEndpoint,
         ISendEndpointProvider sendEndpointProvider,
-        IMessageDeserializer deserializer,
+        IDeserializerResolver deserializerResolver,
         CancellationToken cancellationToken = default);
 }

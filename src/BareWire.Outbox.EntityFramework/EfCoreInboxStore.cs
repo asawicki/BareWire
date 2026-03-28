@@ -5,11 +5,14 @@ namespace BareWire.Outbox.EntityFramework;
 internal sealed class EfCoreInboxStore : IInboxStore
 {
     private readonly OutboxDbContext _dbContext;
+    private readonly IInboxSqlDialect _dialect;
 
-    internal EfCoreInboxStore(OutboxDbContext dbContext)
+    internal EfCoreInboxStore(OutboxDbContext dbContext, IInboxSqlDialect dialect)
     {
         ArgumentNullException.ThrowIfNull(dbContext);
+        ArgumentNullException.ThrowIfNull(dialect);
         _dbContext = dbContext;
+        _dialect = dialect;
     }
 
     public async ValueTask<bool> TryLockAsync(
@@ -23,51 +26,38 @@ internal sealed class EfCoreInboxStore : IInboxStore
         DateTimeOffset now = DateTimeOffset.UtcNow;
         DateTimeOffset expiresAt = now + lockTimeout;
 
-        var entry = new InboxMessage
-        {
-            MessageId = messageId,
-            ConsumerType = consumerType,
-            ReceivedAt = now,
-            ExpiresAt = expiresAt
-        };
+        // Upsert via dialect — eliminates DbUpdateException on duplicates.
+        int rowsAffected = await _dbContext.Database.ExecuteSqlAsync(
+            _dialect.GetUpsertSql(messageId, consumerType, now, expiresAt),
+            cancellationToken).ConfigureAwait(false);
 
-        _dbContext.InboxMessages.Add(entry);
-
-        try
+        if (rowsAffected > 0)
         {
-            await _dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-            return true;
+            return true; // Lock acquired.
         }
-        catch (DbUpdateException)
+
+        // Existing entry — check if expired and unprocessed → re-lock.
+        InboxMessage? existing = await _dbContext.Set<InboxMessage>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                m => m.MessageId == messageId && m.ConsumerType == consumerType,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        if (existing is null || existing.ExpiresAt >= now || existing.ProcessedAt is not null)
         {
-            // Unique constraint violation — message already in inbox.
-            // Detach the failed entity so the DbContext change tracker is clean.
-            _dbContext.Entry(entry).State = EntityState.Detached;
-
-            // Check if the existing entry is expired — if so, re-lock it.
-            InboxMessage? existing = await _dbContext.Set<InboxMessage>()
-                .AsNoTracking()
-                .FirstOrDefaultAsync(
-                    m => m.MessageId == messageId && m.ConsumerType == consumerType,
-                    cancellationToken)
-                .ConfigureAwait(false);
-
-            if (existing is null || existing.ExpiresAt >= now || existing.ProcessedAt is not null)
-            {
-                // Not expired, already processed, or somehow missing after the constraint violation — duplicate.
-                return false;
-            }
-
-            // Expired lock — update ExpiresAt to re-acquire.
-            await _dbContext.Set<InboxMessage>()
-                .Where(m => m.MessageId == messageId && m.ConsumerType == consumerType)
-                .ExecuteUpdateAsync(
-                    s => s.SetProperty(m => m.ExpiresAt, expiresAt),
-                    cancellationToken)
-                .ConfigureAwait(false);
-
-            return true;
+            return false; // Not expired, already processed, or missing — duplicate.
         }
+
+        // Expired lock — update ExpiresAt to re-acquire.
+        await _dbContext.Set<InboxMessage>()
+            .Where(m => m.MessageId == messageId && m.ConsumerType == consumerType)
+            .ExecuteUpdateAsync(
+                s => s.SetProperty(m => m.ExpiresAt, expiresAt),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        return true;
     }
 
     public async ValueTask MarkProcessedAsync(

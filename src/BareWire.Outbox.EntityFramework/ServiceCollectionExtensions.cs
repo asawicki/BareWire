@@ -3,6 +3,7 @@ using BareWire.Abstractions.Pipeline;
 using BareWire.Outbox;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -53,8 +54,13 @@ public static class ServiceCollectionExtensions
         // Factory lambdas are required because the implementation classes have internal constructors.
         services.AddScoped<IOutboxStore>(sp =>
             new EfCoreOutboxStore(sp.GetRequiredService<OutboxDbContext>()));
+        // Register the default SQL dialect for inbox upserts (PostgreSQL).
+        // Users can replace this with a custom implementation for other database providers.
+        services.TryAddSingleton<IInboxSqlDialect, PostgresInboxSqlDialect>();
         services.AddScoped<IInboxStore>(sp =>
-            new EfCoreInboxStore(sp.GetRequiredService<OutboxDbContext>()));
+            new EfCoreInboxStore(
+                sp.GetRequiredService<OutboxDbContext>(),
+                sp.GetRequiredService<IInboxSqlDialect>()));
 
         // Register InboxFilter as scoped — it depends on the scoped IInboxStore.
         services.AddScoped(sp => new InboxFilter(

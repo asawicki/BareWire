@@ -3,6 +3,8 @@ using System.Reflection;
 using BareWire.Abstractions;
 using BareWire.Abstractions.Saga;
 using BareWire.Abstractions.Serialization;
+using BareWire.Abstractions.Transport;
+using BareWire.Saga.Scheduling;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -19,7 +21,7 @@ internal sealed partial class SagaMessageDispatcher<TStateMachine, TSaga> : ISag
     where TStateMachine : BareWireStateMachine<TSaga>
     where TSaga : class, ISagaState, new()
 {
-    // Type-erased delegate: (scopeFactory, definition, loggerFactory, body, headers, msgId, pub, send, deser, ct) -> Task<bool>
+    // Type-erased delegate: (scopeFactory, definition, loggerFactory, body, headers, msgId, endpointName, pub, send, deserResolver, ct) -> Task<bool>
     private delegate Task<bool> TryDispatchEventDelegate(
         IServiceScopeFactory scopeFactory,
         StateMachineDefinition<TSaga> definition,
@@ -27,9 +29,10 @@ internal sealed partial class SagaMessageDispatcher<TStateMachine, TSaga> : ISag
         ReadOnlySequence<byte> body,
         IReadOnlyDictionary<string, string> headers,
         string messageId,
+        string endpointName,
         IPublishEndpoint publishEndpoint,
         ISendEndpointProvider sendEndpointProvider,
-        IMessageDeserializer deserializer,
+        IDeserializerResolver deserializerResolver,
         CancellationToken cancellationToken);
 
     private static readonly MethodInfo BuildEventDelegateMethod =
@@ -85,9 +88,10 @@ internal sealed partial class SagaMessageDispatcher<TStateMachine, TSaga> : ISag
         ReadOnlySequence<byte> body,
         IReadOnlyDictionary<string, string> headers,
         string messageId,
+        string endpointName,
         IPublishEndpoint publishEndpoint,
         ISendEndpointProvider sendEndpointProvider,
-        IMessageDeserializer deserializer,
+        IDeserializerResolver deserializerResolver,
         CancellationToken cancellationToken = default)
     {
         // When BW-MessageType header is present, dispatch only the matching event type
@@ -101,9 +105,9 @@ internal sealed partial class SagaMessageDispatcher<TStateMachine, TSaga> : ISag
                 {
                     return await _eventDispatchers[i](
                         _scopeFactory, _definition, _loggerFactory,
-                        body, headers, messageId,
+                        body, headers, messageId, endpointName,
                         publishEndpoint, sendEndpointProvider,
-                        deserializer, cancellationToken).ConfigureAwait(false);
+                        deserializerResolver, cancellationToken).ConfigureAwait(false);
                 }
             }
 
@@ -116,9 +120,9 @@ internal sealed partial class SagaMessageDispatcher<TStateMachine, TSaga> : ISag
         {
             bool handled = await dispatch(
                 _scopeFactory, _definition, _loggerFactory,
-                body, headers, messageId,
+                body, headers, messageId, endpointName,
                 publishEndpoint, sendEndpointProvider,
-                deserializer, cancellationToken).ConfigureAwait(false);
+                deserializerResolver, cancellationToken).ConfigureAwait(false);
 
             if (handled)
                 return true;
@@ -131,8 +135,10 @@ internal sealed partial class SagaMessageDispatcher<TStateMachine, TSaga> : ISag
     private static TryDispatchEventDelegate BuildEventDelegate<TEvent>()
         where TEvent : class
     {
-        return async (scopeFactory, definition, loggerFactory, body, headers, messageId, pub, send, deser, ct) =>
+        return async (scopeFactory, definition, loggerFactory, body, headers, messageId, endpointName, pub, send, deserResolver, ct) =>
         {
+            headers.TryGetValue("content-type", out string? contentType);
+            IMessageDeserializer deser = deserResolver.Resolve(contentType);
             TEvent? evt = deser.Deserialize<TEvent>(body);
             if (evt is null)
                 return false;
@@ -140,7 +146,6 @@ internal sealed partial class SagaMessageDispatcher<TStateMachine, TSaga> : ISag
             Guid id = Guid.TryParse(messageId, out Guid parsed) ? parsed : Guid.NewGuid();
             Guid? correlationId = TryParseGuidHeader(headers, "correlation-id");
             Guid? conversationId = TryParseGuidHeader(headers, "conversation-id");
-            headers.TryGetValue("content-type", out string? contentType);
 
             // Build a ConsumeContext to pass to the executor so sagas can publish/send side-effects.
             SagaDispatchConsumeContext context = new(
@@ -151,10 +156,15 @@ internal sealed partial class SagaMessageDispatcher<TStateMachine, TSaga> : ISag
 
             // Create a scope per message so ISagaRepository<TSaga> (scoped via EF Core DbContext)
             // gets a fresh instance and is properly disposed after processing.
-            using IServiceScope scope = scopeFactory.CreateScope();
+            await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
             ISagaRepository<TSaga> repository = scope.ServiceProvider.GetRequiredService<ISagaRepository<TSaga>>();
+            ITransportAdapter transport = scope.ServiceProvider.GetRequiredService<ITransportAdapter>();
+            IMessageSerializer serializer = scope.ServiceProvider.GetRequiredService<IMessageSerializer>();
+            IScheduleProvider scheduleProvider = ScheduleProviderFactory.Create(
+                SchedulingStrategy.Auto, transport, loggerFactory, serializer);
             var executor = new StateMachineExecutor<TSaga>(
-                definition, repository, loggerFactory.CreateLogger<StateMachineExecutor<TSaga>>());
+                definition, repository, loggerFactory.CreateLogger<StateMachineExecutor<TSaga>>(),
+                scheduleProvider, endpointName);
 
             await executor.ProcessEventAsync(evt, context, ct).ConfigureAwait(false);
             return true;

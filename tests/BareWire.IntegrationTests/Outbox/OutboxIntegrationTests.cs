@@ -344,7 +344,7 @@ public sealed class EfCoreInboxStoreTests : IAsyncLifetime
         _dbContext = new OutboxDbContext(options);
         await _dbContext.Database.EnsureCreatedAsync();
 
-        _store = new EfCoreInboxStore(_dbContext);
+        _store = new EfCoreInboxStore(_dbContext, new PostgresInboxSqlDialect());
     }
 
     public async ValueTask DisposeAsync()
@@ -388,7 +388,7 @@ public sealed class EfCoreInboxStoreTests : IAsyncLifetime
             .UseSqlite(_connection)
             .Options;
         _dbContext = new OutboxDbContext(options);
-        _store = new EfCoreInboxStore(_dbContext);
+        _store = new EfCoreInboxStore(_dbContext, new PostgresInboxSqlDialect());
 
         // Act — duplicate attempt with the same (MessageId, ConsumerType) key
         bool second = await _store.TryLockAsync(messageId, consumerType, TimeSpan.FromMinutes(5), CancellationToken.None);
@@ -533,7 +533,7 @@ public sealed class TransactionalOutboxMiddlewareTests : IAsyncLifetime
     private void RebuildComponents()
     {
         _outboxStore = new EfCoreOutboxStore(_dbContext);
-        _inboxStore = new EfCoreInboxStore(_dbContext);
+        _inboxStore = new EfCoreInboxStore(_dbContext, new PostgresInboxSqlDialect());
 
         var outboxOptions = new OutboxOptions
         {

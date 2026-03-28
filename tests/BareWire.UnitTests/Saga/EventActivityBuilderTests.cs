@@ -126,6 +126,34 @@ public sealed class EventActivityBuilderTests
     }
 
     [Fact]
+    public void ScheduleTimeout_WithHandle_UsesHandleDelay()
+    {
+        var builder = new EventActivityBuilder<TestSagaState, TestEvent>();
+        var handle = new ScheduleHandle<TestTimeout>(TimeSpan.FromSeconds(30), SchedulingStrategy.Auto);
+
+        builder.ScheduleTimeout<TestTimeout>((_, _) => new TestTimeout(), handle);
+
+        builder.Steps.Count.Should().Be(1);
+        builder.Steps[0].Should().BeOfType<ScheduleTimeoutActivity<TestSagaState, TestEvent, TestTimeout>>();
+    }
+
+    [Fact]
+    public async Task ScheduleTimeout_WithHandle_PropagatesDelayToBehaviorContext()
+    {
+        var builder = new EventActivityBuilder<TestSagaState, TestEvent>();
+        var handle = new ScheduleHandle<TestTimeout>(TimeSpan.FromSeconds(30), SchedulingStrategy.Auto);
+        builder.ScheduleTimeout<TestTimeout>((_, _) => new TestTimeout(), handle);
+
+        var saga = new TestSagaState { CorrelationId = Guid.NewGuid() };
+        var context = new BehaviorContext<TestSagaState, TestEvent>(saga, new TestEvent("t"), CreateConsumeContext());
+
+        await builder.Steps[0].ExecuteAsync(context, CancellationToken.None);
+
+        context.ScheduledTimeouts.Should().HaveCount(1);
+        context.ScheduledTimeouts[0].Delay.Should().Be(TimeSpan.FromSeconds(30));
+    }
+
+    [Fact]
     public async Task TransitionTo_WhenExecuted_SetsTargetStateOnContext()
     {
         var builder = new EventActivityBuilder<TestSagaState, TestEvent>();

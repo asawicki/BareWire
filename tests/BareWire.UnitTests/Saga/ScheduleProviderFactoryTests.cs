@@ -1,5 +1,6 @@
 using AwesomeAssertions;
 using BareWire.Abstractions;
+using BareWire.Abstractions.Serialization;
 using BareWire.Abstractions.Transport;
 using BareWire.Saga.Scheduling;
 using Microsoft.Extensions.Logging;
@@ -22,6 +23,13 @@ public sealed class ScheduleProviderFactoryTests
     private static NullLoggerFactory CreateLoggerFactory()
         => NullLoggerFactory.Instance;
 
+    private static IMessageSerializer CreateSerializer()
+    {
+        var serializer = Substitute.For<IMessageSerializer>();
+        serializer.ContentType.Returns("application/json");
+        return serializer;
+    }
+
     // ── Tests ─────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -29,8 +37,9 @@ public sealed class ScheduleProviderFactoryTests
     {
         var transport = CreateTransportAdapter();
         var loggerFactory = CreateLoggerFactory();
+        var serializer = CreateSerializer();
 
-        var provider = ScheduleProviderFactory.Create(SchedulingStrategy.Auto, transport, loggerFactory);
+        var provider = ScheduleProviderFactory.Create(SchedulingStrategy.Auto, transport, loggerFactory, serializer);
 
         provider.Should().BeOfType<DelayRequeueScheduleProvider>();
     }
@@ -40,8 +49,9 @@ public sealed class ScheduleProviderFactoryTests
     {
         var transport = CreateTransportAdapter();
         var loggerFactory = CreateLoggerFactory();
+        var serializer = CreateSerializer();
 
-        var provider = ScheduleProviderFactory.Create(SchedulingStrategy.DelayRequeue, transport, loggerFactory);
+        var provider = ScheduleProviderFactory.Create(SchedulingStrategy.DelayRequeue, transport, loggerFactory, serializer);
 
         provider.Should().BeOfType<DelayRequeueScheduleProvider>();
     }
@@ -51,8 +61,9 @@ public sealed class ScheduleProviderFactoryTests
     {
         var transport = CreateTransportAdapter();
         var loggerFactory = CreateLoggerFactory();
+        var serializer = CreateSerializer();
 
-        Action act = () => ScheduleProviderFactory.Create(SchedulingStrategy.TransportNative, transport, loggerFactory);
+        Action act = () => ScheduleProviderFactory.Create(SchedulingStrategy.TransportNative, transport, loggerFactory, serializer);
 
         act.Should().Throw<NotSupportedException>();
     }
@@ -62,8 +73,9 @@ public sealed class ScheduleProviderFactoryTests
     {
         var transport = CreateTransportAdapter();
         var loggerFactory = CreateLoggerFactory();
+        var serializer = CreateSerializer();
 
-        Action act = () => ScheduleProviderFactory.Create(SchedulingStrategy.ExternalScheduler, transport, loggerFactory);
+        Action act = () => ScheduleProviderFactory.Create(SchedulingStrategy.ExternalScheduler, transport, loggerFactory, serializer);
 
         act.Should().Throw<NotSupportedException>();
     }
@@ -73,8 +85,9 @@ public sealed class ScheduleProviderFactoryTests
     {
         var transport = CreateTransportAdapter();
         var loggerFactory = CreateLoggerFactory();
+        var serializer = CreateSerializer();
 
-        Action act = () => ScheduleProviderFactory.Create(SchedulingStrategy.DelayTopic, transport, loggerFactory);
+        Action act = () => ScheduleProviderFactory.Create(SchedulingStrategy.DelayTopic, transport, loggerFactory, serializer);
 
         act.Should().Throw<NotSupportedException>();
     }
@@ -83,8 +96,9 @@ public sealed class ScheduleProviderFactoryTests
     public void Create_NullTransport_ThrowsArgumentNullException()
     {
         var loggerFactory = CreateLoggerFactory();
+        var serializer = CreateSerializer();
 
-        Action act = () => ScheduleProviderFactory.Create(SchedulingStrategy.Auto, null!, loggerFactory);
+        Action act = () => ScheduleProviderFactory.Create(SchedulingStrategy.Auto, null!, loggerFactory, serializer);
 
         act.Should().Throw<ArgumentNullException>();
     }
@@ -93,8 +107,9 @@ public sealed class ScheduleProviderFactoryTests
     public void Create_NullLoggerFactory_ThrowsArgumentNullException()
     {
         var transport = CreateTransportAdapter();
+        var serializer = CreateSerializer();
 
-        Action act = () => ScheduleProviderFactory.Create(SchedulingStrategy.Auto, transport, null!);
+        Action act = () => ScheduleProviderFactory.Create(SchedulingStrategy.Auto, transport, null!, serializer);
 
         act.Should().Throw<ArgumentNullException>();
     }

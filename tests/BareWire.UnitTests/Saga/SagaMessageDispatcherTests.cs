@@ -5,6 +5,7 @@ using AwesomeAssertions;
 using BareWire.Abstractions;
 using BareWire.Abstractions.Saga;
 using BareWire.Abstractions.Serialization;
+using BareWire.Abstractions.Transport;
 using BareWire.Saga;
 using BareWire.Serialization.Json;
 using Microsoft.Extensions.DependencyInjection;
@@ -14,6 +15,18 @@ using NSubstitute;
 using Xunit;
 
 namespace BareWire.UnitTests.Saga;
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// Minimal IServiceScope implementation that wraps a mock IServiceProvider.
+/// Required because AsyncServiceScope is a struct and cannot be substituted by NSubstitute.
+/// </summary>
+internal sealed class MockServiceScope(IServiceProvider serviceProvider) : IServiceScope
+{
+    public IServiceProvider ServiceProvider { get; } = serviceProvider;
+    public void Dispose() { }
+}
 
 // ── Types for dispatcher tests ────────────────────────────────────────────────
 
@@ -75,7 +88,7 @@ public sealed class SagaMessageDispatcherTests
 {
     private readonly ISagaRepository<DispatcherSagaState> _repository;
     private readonly SagaMessageDispatcher<DispatcherStateMachine, DispatcherSagaState> _dispatcher;
-    private readonly IMessageDeserializer _deserializer;
+    private readonly IDeserializerResolver _deserializerResolver;
     private readonly IPublishEndpoint _publishEndpoint;
     private readonly ISendEndpointProvider _sendEndpointProvider;
 
@@ -90,15 +103,27 @@ public sealed class SagaMessageDispatcherTests
         _repository.SaveAsync(Arg.Any<DispatcherSagaState>(), Arg.Any<CancellationToken>())
                    .Returns(Task.CompletedTask);
 
-        // Build a minimal IServiceScopeFactory that returns the mocked repository
-        // when ISagaRepository<DispatcherSagaState> is requested.
+        // Build a minimal IServiceScopeFactory that returns the mocked repository,
+        // ITransportAdapter, and IMessageSerializer when requested from the scope.
+        // SagaMessageDispatcher resolves all three per-message to build the schedule provider.
+        var transport = Substitute.For<ITransportAdapter>();
+        transport.TransportName.Returns("test");
+        var messageSerializer = Substitute.For<IMessageSerializer>();
+        messageSerializer.ContentType.Returns("application/json");
+
         var scopeFactory = Substitute.For<IServiceScopeFactory>();
-        var scope = Substitute.For<IServiceScope>();
         var serviceProvider = Substitute.For<IServiceProvider>();
         serviceProvider.GetService(typeof(ISagaRepository<DispatcherSagaState>))
                        .Returns(_repository);
-        scope.ServiceProvider.Returns(serviceProvider);
-        scopeFactory.CreateScope().Returns(scope);
+        serviceProvider.GetService(typeof(ITransportAdapter))
+                       .Returns(transport);
+        serviceProvider.GetService(typeof(IMessageSerializer))
+                       .Returns(messageSerializer);
+
+        // CreateAsyncScope() returns an AsyncServiceScope (a struct). NSubstitute cannot
+        // substitute structs, so we provide a real AsyncServiceScope wrapping our mock provider.
+        var asyncScope = new AsyncServiceScope(new MockServiceScope(serviceProvider));
+        scopeFactory.CreateAsyncScope().Returns(asyncScope);
 
         ILoggerFactory loggerFactory = NullLoggerFactory.Instance;
 
@@ -108,7 +133,9 @@ public sealed class SagaMessageDispatcherTests
             scopeFactory,
             loggerFactory);
 
-        _deserializer = new SystemTextJsonRawDeserializer();
+        IMessageDeserializer jsonDeserializer = new SystemTextJsonRawDeserializer();
+        _deserializerResolver = Substitute.For<IDeserializerResolver>();
+        _deserializerResolver.Resolve(Arg.Any<string?>()).Returns(jsonDeserializer);
         _publishEndpoint = Substitute.For<IPublishEndpoint>();
         _sendEndpointProvider = Substitute.For<ISendEndpointProvider>();
     }
@@ -142,9 +169,10 @@ public sealed class SagaMessageDispatcherTests
             body,
             headers: new Dictionary<string, string>(),
             messageId: Guid.NewGuid().ToString(),
+            endpointName: "test-endpoint",
             _publishEndpoint,
             _sendEndpointProvider,
-            _deserializer,
+            _deserializerResolver,
             CancellationToken.None);
 
         // Assert — dispatcher matched and state machine ran
@@ -174,9 +202,10 @@ public sealed class SagaMessageDispatcherTests
             body,
             headers: new Dictionary<string, string>(),
             messageId: Guid.NewGuid().ToString(),
+            endpointName: "test-endpoint",
             _publishEndpoint,
             _sendEndpointProvider,
-            _deserializer,
+            _deserializerResolver,
             CancellationToken.None);
 
         // Assert
@@ -200,9 +229,10 @@ public sealed class SagaMessageDispatcherTests
             body,
             headers: new Dictionary<string, string>(),
             messageId: Guid.NewGuid().ToString(),
+            endpointName: "test-endpoint",
             _publishEndpoint,
             _sendEndpointProvider,
-            _deserializer,
+            _deserializerResolver,
             CancellationToken.None);
 
         // Assert
@@ -221,9 +251,10 @@ public sealed class SagaMessageDispatcherTests
             body,
             headers: new Dictionary<string, string>(),
             messageId: Guid.NewGuid().ToString(),
+            endpointName: "test-endpoint",
             _publishEndpoint,
             _sendEndpointProvider,
-            _deserializer,
+            _deserializerResolver,
             CancellationToken.None);
 
         // Assert

@@ -14,6 +14,7 @@ internal sealed partial class StateMachineExecutor<TSaga>
     private readonly ISagaRepository<TSaga> _repository;
     private readonly ILogger<StateMachineExecutor<TSaga>> _logger;
     private readonly IScheduleProvider? _scheduleProvider;
+    private readonly string? _sourceEndpointName;
     private readonly int _maxRetries;
 
     internal StateMachineExecutor(
@@ -21,6 +22,7 @@ internal sealed partial class StateMachineExecutor<TSaga>
         ISagaRepository<TSaga> repository,
         ILogger<StateMachineExecutor<TSaga>> logger,
         IScheduleProvider? scheduleProvider = null,
+        string? sourceEndpointName = null,
         int maxRetries = 3)
     {
         ArgumentNullException.ThrowIfNull(definition);
@@ -30,6 +32,7 @@ internal sealed partial class StateMachineExecutor<TSaga>
         _repository = repository;
         _logger = logger;
         _scheduleProvider = scheduleProvider;
+        _sourceEndpointName = sourceEndpointName;
         _maxRetries = maxRetries;
     }
 
@@ -131,8 +134,10 @@ internal sealed partial class StateMachineExecutor<TSaga>
             .GetMethod(nameof(IScheduleProvider.ScheduleAsync))!
             .MakeGenericMethod(timeout.MessageType);
 
-        // Derive the destination queue name from the message type (convention: lowercase type name).
-        var destinationQueue = timeout.MessageType.Name.ToLowerInvariant();
+        // Use the source endpoint name so timeouts are re-delivered back to the same queue.
+        // Fallback to the lowercased message type name as a safety net when sourceEndpointName is null.
+        var destinationQueue = _sourceEndpointName
+            ?? timeout.MessageType.Name.ToLowerInvariant();
 
         return (Task)scheduleMethod.Invoke(
             _scheduleProvider,
