@@ -89,4 +89,43 @@ public sealed class FlowControllerTests
 
         status.Should().Be(BusStatus.Healthy);
     }
+
+    // --- Null-guard tests targeting surviving mutants ---
+
+    [Fact]
+    public void Constructor_WhenLoggerIsNull_ThrowsArgumentNullException()
+    {
+        // Targets MUT-759: mutation removes `?? throw new ArgumentNullException(nameof(logger))`
+        // from the constructor, making null silently stored in _logger.
+        Action act = () => _ = new FlowController(null!);
+
+        act.Should().Throw<ArgumentNullException>()
+            .WithParameterName("logger");
+    }
+
+    [Fact]
+    public void GetOrCreateManager_NullOptions_ThrowsArgumentNullException()
+    {
+        // Targets MUT-762: mutation removes `ArgumentNullException.ThrowIfNull(options)`,
+        // causing null to be forwarded to CreditManager instead of failing fast.
+        var controller = CreateController();
+
+        Action act = () => controller.GetOrCreateManager("my-queue", null!);
+
+        act.Should().Throw<ArgumentNullException>()
+            .WithParameterName("options");
+    }
+
+    [Fact]
+    public void CheckHealth_NullEndpointName_ThrowsArgumentNullException()
+    {
+        // Targets MUT-764: mutation removes `ArgumentNullException.ThrowIfNull(endpointName)`,
+        // letting null reach ConcurrentDictionary which would throw with misleading param name "key".
+        var controller = CreateController();
+
+        Action act = () => controller.CheckHealth(null!);
+
+        act.Should().Throw<ArgumentNullException>()
+            .WithParameterName("endpointName");
+    }
 }

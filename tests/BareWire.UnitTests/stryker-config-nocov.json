@@ -1,0 +1,9 @@
+{
+  "stryker-config": {
+    "ignore-mutations": ["string"],
+    "reporters": ["json"],
+    "test-runner": "mtp",
+    "concurrency": 1,
+    "coverage-analysis": "off"
+  }
+}

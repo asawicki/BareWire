@@ -154,6 +154,29 @@ public sealed class MiddlewareChainTests
     }
 
     [Fact]
+    public void InvokeAsync_WhenContextIsNull_ThrowsArgumentNullException()
+    {
+        var chain = new MiddlewareChain([]);
+        NextMiddleware terminator = _ => Task.CompletedTask;
+
+        Action act = () => chain.InvokeAsync(null!, terminator);
+
+        act.Should().Throw<ArgumentNullException>()
+            .WithParameterName("context");
+    }
+
+    [Fact]
+    public void InvokeAsync_WhenTerminatorIsNull_ThrowsArgumentNullException()
+    {
+        var chain = new MiddlewareChain([]);
+
+        Action act = () => chain.InvokeAsync(CreateContext(), null!);
+
+        act.Should().Throw<ArgumentNullException>()
+            .WithParameterName("terminator");
+    }
+
+    [Fact]
     public async Task InvokeAsync_CancellationDuringMiddleware_PropagatesCancellation()
     {
         using var cts = new CancellationTokenSource();

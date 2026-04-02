@@ -1,4 +1,3 @@
-using System.Buffers;
 using AwesomeAssertions;
 using BareWire.Abstractions;
 using BareWire.Abstractions.Serialization;
@@ -209,5 +208,486 @@ public sealed class BareWireBusControlTests
         Func<Task> act = async () => await control.CreateRequestClientAsync<BusTestMessage>();
 
         await act.Should().ThrowAsync<NotSupportedException>();
+    }
+
+    // ── Constructor null guards ───────────────────────────────────────────────
+
+    [Fact]
+    public void Constructor_WhenBusIsNull_ThrowsArgumentNullException()
+    {
+        ITransportAdapter adapter = Substitute.For<ITransportAdapter>();
+        adapter.TransportName.Returns("test");
+
+        IMessageSerializer serializer = Substitute.For<IMessageSerializer>();
+        serializer.ContentType.Returns("application/json");
+
+        IDeserializerResolver deserializerResolver = Substitute.For<IDeserializerResolver>();
+
+        MiddlewareChain chain = new([]);
+        MessagePipeline pipeline = new(chain, deserializerResolver, NullLogger<MessagePipeline>.Instance, new NullInstrumentation());
+        FlowController flowController = new(NullLogger<FlowController>.Instance);
+
+        BusConfigurator configurator = new();
+        configurator.HasInMemoryTransport = true;
+
+        // bus = null triggers MUT-299
+        Action act = () => _ = new BareWireBusControl(
+            bus: null!,
+            adapter: adapter,
+            flowController: flowController,
+            configurator: configurator,
+            logger: NullLogger<BareWireBusControl>.Instance,
+            topology: null,
+            endpointBindings: [],
+            deserializerResolver: deserializerResolver,
+            scopeFactory: Substitute.For<IServiceScopeFactory>(),
+            instrumentation: new NullInstrumentation(),
+            loggerFactory: NullLoggerFactory.Instance,
+            sagaDispatchers: []);
+
+        act.Should().Throw<ArgumentNullException>().WithParameterName("bus");
+    }
+
+    [Fact]
+    public void Constructor_WhenAdapterIsNull_ThrowsArgumentNullException()
+    {
+        ITransportAdapter adapter = Substitute.For<ITransportAdapter>();
+        adapter.TransportName.Returns("test");
+
+        IMessageSerializer serializer = Substitute.For<IMessageSerializer>();
+        serializer.ContentType.Returns("application/json");
+
+        IDeserializerResolver deserializerResolver = Substitute.For<IDeserializerResolver>();
+
+        MiddlewareChain chain = new([]);
+        MessagePipeline pipeline = new(chain, deserializerResolver, NullLogger<MessagePipeline>.Instance, new NullInstrumentation());
+        FlowController flowController = new(NullLogger<FlowController>.Instance);
+
+        BareWireBus bus = new(
+            adapter,
+            serializer,
+            pipeline,
+            flowController,
+            new PublishFlowControlOptions(),
+            NullLogger<BareWireBus>.Instance,
+            new NullInstrumentation());
+
+        BusConfigurator configurator = new();
+        configurator.HasInMemoryTransport = true;
+
+        Action act = () => _ = new BareWireBusControl(
+            bus: bus,
+            adapter: null!,
+            flowController: flowController,
+            configurator: configurator,
+            logger: NullLogger<BareWireBusControl>.Instance,
+            topology: null,
+            endpointBindings: [],
+            deserializerResolver: deserializerResolver,
+            scopeFactory: Substitute.For<IServiceScopeFactory>(),
+            instrumentation: new NullInstrumentation(),
+            loggerFactory: NullLoggerFactory.Instance,
+            sagaDispatchers: []);
+
+        act.Should().Throw<ArgumentNullException>().WithParameterName("adapter");
+    }
+
+    [Fact]
+    public void Constructor_WhenFlowControllerIsNull_ThrowsArgumentNullException()
+    {
+        ITransportAdapter adapter = Substitute.For<ITransportAdapter>();
+        adapter.TransportName.Returns("test");
+
+        IMessageSerializer serializer = Substitute.For<IMessageSerializer>();
+        serializer.ContentType.Returns("application/json");
+
+        IDeserializerResolver deserializerResolver = Substitute.For<IDeserializerResolver>();
+
+        MiddlewareChain chain = new([]);
+        MessagePipeline pipeline = new(chain, deserializerResolver, NullLogger<MessagePipeline>.Instance, new NullInstrumentation());
+        FlowController flowController = new(NullLogger<FlowController>.Instance);
+
+        BareWireBus bus = new(
+            adapter,
+            serializer,
+            pipeline,
+            flowController,
+            new PublishFlowControlOptions(),
+            NullLogger<BareWireBus>.Instance,
+            new NullInstrumentation());
+
+        BusConfigurator configurator = new();
+        configurator.HasInMemoryTransport = true;
+
+        Action act = () => _ = new BareWireBusControl(
+            bus: bus,
+            adapter: adapter,
+            flowController: null!,
+            configurator: configurator,
+            logger: NullLogger<BareWireBusControl>.Instance,
+            topology: null,
+            endpointBindings: [],
+            deserializerResolver: deserializerResolver,
+            scopeFactory: Substitute.For<IServiceScopeFactory>(),
+            instrumentation: new NullInstrumentation(),
+            loggerFactory: NullLoggerFactory.Instance,
+            sagaDispatchers: []);
+
+        act.Should().Throw<ArgumentNullException>().WithParameterName("flowController");
+    }
+
+    [Fact]
+    public void Constructor_WhenConfiguratorIsNull_ThrowsArgumentNullException()
+    {
+        ITransportAdapter adapter = Substitute.For<ITransportAdapter>();
+        adapter.TransportName.Returns("test");
+
+        IMessageSerializer serializer = Substitute.For<IMessageSerializer>();
+        serializer.ContentType.Returns("application/json");
+
+        IDeserializerResolver deserializerResolver = Substitute.For<IDeserializerResolver>();
+
+        MiddlewareChain chain = new([]);
+        MessagePipeline pipeline = new(chain, deserializerResolver, NullLogger<MessagePipeline>.Instance, new NullInstrumentation());
+        FlowController flowController = new(NullLogger<FlowController>.Instance);
+
+        BareWireBus bus = new(
+            adapter,
+            serializer,
+            pipeline,
+            flowController,
+            new PublishFlowControlOptions(),
+            NullLogger<BareWireBus>.Instance,
+            new NullInstrumentation());
+
+        Action act = () => _ = new BareWireBusControl(
+            bus: bus,
+            adapter: adapter,
+            flowController: flowController,
+            configurator: null!,
+            logger: NullLogger<BareWireBusControl>.Instance,
+            topology: null,
+            endpointBindings: [],
+            deserializerResolver: deserializerResolver,
+            scopeFactory: Substitute.For<IServiceScopeFactory>(),
+            instrumentation: new NullInstrumentation(),
+            loggerFactory: NullLoggerFactory.Instance,
+            sagaDispatchers: []);
+
+        act.Should().Throw<ArgumentNullException>().WithParameterName("configurator");
+    }
+
+    [Fact]
+    public void Constructor_WhenLoggerIsNull_ThrowsArgumentNullException()
+    {
+        ITransportAdapter adapter = Substitute.For<ITransportAdapter>();
+        adapter.TransportName.Returns("test");
+
+        IMessageSerializer serializer = Substitute.For<IMessageSerializer>();
+        serializer.ContentType.Returns("application/json");
+
+        IDeserializerResolver deserializerResolver = Substitute.For<IDeserializerResolver>();
+
+        MiddlewareChain chain = new([]);
+        MessagePipeline pipeline = new(chain, deserializerResolver, NullLogger<MessagePipeline>.Instance, new NullInstrumentation());
+        FlowController flowController = new(NullLogger<FlowController>.Instance);
+
+        BareWireBus bus = new(
+            adapter,
+            serializer,
+            pipeline,
+            flowController,
+            new PublishFlowControlOptions(),
+            NullLogger<BareWireBus>.Instance,
+            new NullInstrumentation());
+
+        BusConfigurator configurator = new();
+        configurator.HasInMemoryTransport = true;
+
+        Action act = () => _ = new BareWireBusControl(
+            bus: bus,
+            adapter: adapter,
+            flowController: flowController,
+            configurator: configurator,
+            logger: null!,
+            topology: null,
+            endpointBindings: [],
+            deserializerResolver: deserializerResolver,
+            scopeFactory: Substitute.For<IServiceScopeFactory>(),
+            instrumentation: new NullInstrumentation(),
+            loggerFactory: NullLoggerFactory.Instance,
+            sagaDispatchers: []);
+
+        act.Should().Throw<ArgumentNullException>().WithParameterName("logger");
+    }
+
+    [Fact]
+    public void Constructor_WhenDeserializerResolverIsNull_ThrowsArgumentNullException()
+    {
+        ITransportAdapter adapter = Substitute.For<ITransportAdapter>();
+        adapter.TransportName.Returns("test");
+
+        IMessageSerializer serializer = Substitute.For<IMessageSerializer>();
+        serializer.ContentType.Returns("application/json");
+
+        IDeserializerResolver deserializerResolver = Substitute.For<IDeserializerResolver>();
+
+        MiddlewareChain chain = new([]);
+        MessagePipeline pipeline = new(chain, deserializerResolver, NullLogger<MessagePipeline>.Instance, new NullInstrumentation());
+        FlowController flowController = new(NullLogger<FlowController>.Instance);
+
+        BareWireBus bus = new(
+            adapter,
+            serializer,
+            pipeline,
+            flowController,
+            new PublishFlowControlOptions(),
+            NullLogger<BareWireBus>.Instance,
+            new NullInstrumentation());
+
+        BusConfigurator configurator = new();
+        configurator.HasInMemoryTransport = true;
+
+        Action act = () => _ = new BareWireBusControl(
+            bus: bus,
+            adapter: adapter,
+            flowController: flowController,
+            configurator: configurator,
+            logger: NullLogger<BareWireBusControl>.Instance,
+            topology: null,
+            endpointBindings: [],
+            deserializerResolver: null!,
+            scopeFactory: Substitute.For<IServiceScopeFactory>(),
+            instrumentation: new NullInstrumentation(),
+            loggerFactory: NullLoggerFactory.Instance,
+            sagaDispatchers: []);
+
+        act.Should().Throw<ArgumentNullException>().WithParameterName("deserializerResolver");
+    }
+
+    [Fact]
+    public void Constructor_WhenScopeFactoryIsNull_ThrowsArgumentNullException()
+    {
+        ITransportAdapter adapter = Substitute.For<ITransportAdapter>();
+        adapter.TransportName.Returns("test");
+
+        IMessageSerializer serializer = Substitute.For<IMessageSerializer>();
+        serializer.ContentType.Returns("application/json");
+
+        IDeserializerResolver deserializerResolver = Substitute.For<IDeserializerResolver>();
+
+        MiddlewareChain chain = new([]);
+        MessagePipeline pipeline = new(chain, deserializerResolver, NullLogger<MessagePipeline>.Instance, new NullInstrumentation());
+        FlowController flowController = new(NullLogger<FlowController>.Instance);
+
+        BareWireBus bus = new(
+            adapter,
+            serializer,
+            pipeline,
+            flowController,
+            new PublishFlowControlOptions(),
+            NullLogger<BareWireBus>.Instance,
+            new NullInstrumentation());
+
+        BusConfigurator configurator = new();
+        configurator.HasInMemoryTransport = true;
+
+        Action act = () => _ = new BareWireBusControl(
+            bus: bus,
+            adapter: adapter,
+            flowController: flowController,
+            configurator: configurator,
+            logger: NullLogger<BareWireBusControl>.Instance,
+            topology: null,
+            endpointBindings: [],
+            deserializerResolver: deserializerResolver,
+            scopeFactory: null!,
+            instrumentation: new NullInstrumentation(),
+            loggerFactory: NullLoggerFactory.Instance,
+            sagaDispatchers: []);
+
+        act.Should().Throw<ArgumentNullException>().WithParameterName("scopeFactory");
+    }
+
+    [Fact]
+    public void Constructor_WhenInstrumentationIsNull_ThrowsArgumentNullException()
+    {
+        ITransportAdapter adapter = Substitute.For<ITransportAdapter>();
+        adapter.TransportName.Returns("test");
+
+        IMessageSerializer serializer = Substitute.For<IMessageSerializer>();
+        serializer.ContentType.Returns("application/json");
+
+        IDeserializerResolver deserializerResolver = Substitute.For<IDeserializerResolver>();
+
+        MiddlewareChain chain = new([]);
+        MessagePipeline pipeline = new(chain, deserializerResolver, NullLogger<MessagePipeline>.Instance, new NullInstrumentation());
+        FlowController flowController = new(NullLogger<FlowController>.Instance);
+
+        BareWireBus bus = new(
+            adapter,
+            serializer,
+            pipeline,
+            flowController,
+            new PublishFlowControlOptions(),
+            NullLogger<BareWireBus>.Instance,
+            new NullInstrumentation());
+
+        BusConfigurator configurator = new();
+        configurator.HasInMemoryTransport = true;
+
+        Action act = () => _ = new BareWireBusControl(
+            bus: bus,
+            adapter: adapter,
+            flowController: flowController,
+            configurator: configurator,
+            logger: NullLogger<BareWireBusControl>.Instance,
+            topology: null,
+            endpointBindings: [],
+            deserializerResolver: deserializerResolver,
+            scopeFactory: Substitute.For<IServiceScopeFactory>(),
+            instrumentation: null!,
+            loggerFactory: NullLoggerFactory.Instance,
+            sagaDispatchers: []);
+
+        act.Should().Throw<ArgumentNullException>().WithParameterName("instrumentation");
+    }
+
+    [Fact]
+    public void Constructor_WhenLoggerFactoryIsNull_ThrowsArgumentNullException()
+    {
+        ITransportAdapter adapter = Substitute.For<ITransportAdapter>();
+        adapter.TransportName.Returns("test");
+
+        IMessageSerializer serializer = Substitute.For<IMessageSerializer>();
+        serializer.ContentType.Returns("application/json");
+
+        IDeserializerResolver deserializerResolver = Substitute.For<IDeserializerResolver>();
+
+        MiddlewareChain chain = new([]);
+        MessagePipeline pipeline = new(chain, deserializerResolver, NullLogger<MessagePipeline>.Instance, new NullInstrumentation());
+        FlowController flowController = new(NullLogger<FlowController>.Instance);
+
+        BareWireBus bus = new(
+            adapter,
+            serializer,
+            pipeline,
+            flowController,
+            new PublishFlowControlOptions(),
+            NullLogger<BareWireBus>.Instance,
+            new NullInstrumentation());
+
+        BusConfigurator configurator = new();
+        configurator.HasInMemoryTransport = true;
+
+        Action act = () => _ = new BareWireBusControl(
+            bus: bus,
+            adapter: adapter,
+            flowController: flowController,
+            configurator: configurator,
+            logger: NullLogger<BareWireBusControl>.Instance,
+            topology: null,
+            endpointBindings: [],
+            deserializerResolver: deserializerResolver,
+            scopeFactory: Substitute.For<IServiceScopeFactory>(),
+            instrumentation: new NullInstrumentation(),
+            loggerFactory: null!,
+            sagaDispatchers: []);
+
+        act.Should().Throw<ArgumentNullException>().WithParameterName("loggerFactory");
+    }
+
+    [Fact]
+    public void Constructor_WhenEndpointBindingsIsNull_DefaultsToEmpty()
+    {
+        // endpointBindings defaults to [] when null (MUT-304/305) — should NOT throw.
+        ITransportAdapter adapter = Substitute.For<ITransportAdapter>();
+        adapter.TransportName.Returns("test");
+
+        IMessageSerializer serializer = Substitute.For<IMessageSerializer>();
+        serializer.ContentType.Returns("application/json");
+
+        IDeserializerResolver deserializerResolver = Substitute.For<IDeserializerResolver>();
+
+        MiddlewareChain chain = new([]);
+        MessagePipeline pipeline = new(chain, deserializerResolver, NullLogger<MessagePipeline>.Instance, new NullInstrumentation());
+        FlowController flowController = new(NullLogger<FlowController>.Instance);
+
+        BareWireBus bus = new(
+            adapter,
+            serializer,
+            pipeline,
+            flowController,
+            new PublishFlowControlOptions(),
+            NullLogger<BareWireBus>.Instance,
+            new NullInstrumentation());
+
+        BusConfigurator configurator = new();
+        configurator.HasInMemoryTransport = true;
+
+        BareWireBusControl control = new(
+            bus: bus,
+            adapter: adapter,
+            flowController: flowController,
+            configurator: configurator,
+            logger: NullLogger<BareWireBusControl>.Instance,
+            topology: null,
+            endpointBindings: null!,
+            deserializerResolver: deserializerResolver,
+            scopeFactory: Substitute.For<IServiceScopeFactory>(),
+            instrumentation: new NullInstrumentation(),
+            loggerFactory: NullLoggerFactory.Instance,
+            sagaDispatchers: []);
+
+        // If construction succeeded, the default [] was applied — verify health check works (non-null field).
+        BusHealthStatus health = control.CheckHealth();
+        health.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void Constructor_WhenSagaDispatchersIsNull_DefaultsToEmpty()
+    {
+        // sagaDispatchers defaults to [] when null (MUT-310/311) — should NOT throw.
+        ITransportAdapter adapter = Substitute.For<ITransportAdapter>();
+        adapter.TransportName.Returns("test");
+
+        IMessageSerializer serializer = Substitute.For<IMessageSerializer>();
+        serializer.ContentType.Returns("application/json");
+
+        IDeserializerResolver deserializerResolver = Substitute.For<IDeserializerResolver>();
+
+        MiddlewareChain chain = new([]);
+        MessagePipeline pipeline = new(chain, deserializerResolver, NullLogger<MessagePipeline>.Instance, new NullInstrumentation());
+        FlowController flowController = new(NullLogger<FlowController>.Instance);
+
+        BareWireBus bus = new(
+            adapter,
+            serializer,
+            pipeline,
+            flowController,
+            new PublishFlowControlOptions(),
+            NullLogger<BareWireBus>.Instance,
+            new NullInstrumentation());
+
+        BusConfigurator configurator = new();
+        configurator.HasInMemoryTransport = true;
+
+        BareWireBusControl control = new(
+            bus: bus,
+            adapter: adapter,
+            flowController: flowController,
+            configurator: configurator,
+            logger: NullLogger<BareWireBusControl>.Instance,
+            topology: null,
+            endpointBindings: [],
+            deserializerResolver: deserializerResolver,
+            scopeFactory: Substitute.For<IServiceScopeFactory>(),
+            instrumentation: new NullInstrumentation(),
+            loggerFactory: NullLoggerFactory.Instance,
+            sagaDispatchers: null!);
+
+        // If construction succeeded, the default [] was applied — verify health check works.
+        BusHealthStatus health = control.CheckHealth();
+        health.Should().NotBeNull();
     }
 }

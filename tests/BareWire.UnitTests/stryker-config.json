@@ -1,0 +1,13 @@
+{
+  "stryker-config": {
+    "test-runner": "mtp",
+    "ignore-mutations": ["string"],
+    "ignore-methods": ["*Log*", "Console.Write*", "ConfigureAwait"],
+    "mutate": ["!**/obj/**", "!**/bin/**", "!**/Generated/**", "!**/*.g.cs", "!**/Migrations/**"],
+    "reporters": ["json", "html", "progress"],
+    "additional-timeout": 5000,
+    "concurrency": 4,
+    "target-framework": "net10.0",
+    "thresholds": { "high": 80, "low": 70, "break": 70 }
+  }
+}

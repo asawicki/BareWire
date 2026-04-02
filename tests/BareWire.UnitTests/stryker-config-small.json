@@ -1,0 +1,10 @@
+{
+  "stryker-config": {
+    "ignore-mutations": ["string"],
+    "reporters": ["json", "progress"],
+    "test-runner": "mtp",
+    "concurrency": 1,
+    "coverage-analysis": "off",
+    "mutate": ["!**/obj/**", "!**/bin/**", "**/BusHandle.cs"]
+  }
+}

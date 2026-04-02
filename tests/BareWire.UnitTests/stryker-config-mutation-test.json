@@ -1,0 +1,16 @@
+{
+  "stryker-config": {
+    "project": "BareWire.csproj",
+    "test-runner": "mtp",
+    "coverage-analysis": "all",
+    "ignore-mutations": ["string"],
+    "ignore-methods": ["*Log*", "Console.Write*", "ConfigureAwait"],
+    "mutate": ["**/BareWireBusControl.cs"],
+    "reporters": ["json", "html", "progress"],
+    "additional-timeout": 5000,
+    "concurrency": 4,
+    "target-framework": "net10.0",
+    "thresholds": { "high": 80, "low": 70, "break": 0 },
+    "mutation-level": "Standard"
+  }
+}
