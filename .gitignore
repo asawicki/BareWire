@@ -54,6 +54,7 @@ Thumbs.db
 # Scratch / temp
 .scratch/
 .claude/
+.forge/
 
 # Project docs (kept locally)
 docs/
