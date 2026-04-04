@@ -1,0 +1,36 @@
+changelog:
+  exclude:
+    labels:
+      - skip-changelog
+    authors:
+      - dependabot
+      - github-actions
+  categories:
+    - title: "⚠️ Breaking Changes"
+      labels:
+        - breaking-change
+    - title: "✨ Features"
+      labels:
+        - enhancement
+        - feature
+    - title: "🐛 Bug Fixes"
+      labels:
+        - bug
+        - fix
+    - title: "📚 Documentation"
+      labels:
+        - documentation
+        - docs
+    - title: "🧪 Tests"
+      labels:
+        - test
+        - tests
+    - title: "🛠️ Maintenance"
+      labels:
+        - chore
+        - ci
+        - refactor
+        - dependencies
+    - title: "📦 Other Changes"
+      labels:
+        - "*"
