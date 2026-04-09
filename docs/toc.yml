@@ -1,6 +1,10 @@
-- name: Articles
+- name: Home
+  href: index.md
+- name: Documentation
   href: articles/
   homepage: articles/getting-started.md
 - name: API Reference
   href: api/
   homepage: api/index.md
+- name: GitHub
+  href: https://github.com/Wizard-Software/BareWire
