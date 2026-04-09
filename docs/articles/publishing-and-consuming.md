@@ -221,6 +221,53 @@ public sealed class AuditMiddleware : IMessageMiddleware
 
 The framework sets `EndpointName` automatically from `EndpointBinding.EndpointName` — no configuration required.
 
+## Routing to a Specific Exchange
+
+By default, every message published via `bus.PublishAsync<T>(...)` lands on the
+`DefaultExchange` configured in `UseRabbitMQ`. When different message types need
+to land on different exchanges without passing a `BW-Exchange` header on every
+call, use `MapExchange<T>(...)` symmetrically to the existing
+`MapRoutingKey<T>(...)`:
+
+```csharp
+services.AddBareWireRabbitMq(cfg =>
+{
+    cfg.Host("amqp://guest:guest@localhost:5672/");
+
+    cfg.ConfigureTopology(t =>
+    {
+        t.DeclareExchange("payments.topic", ExchangeType.Topic);
+        t.DeclareExchange("orders.fanout",  ExchangeType.Fanout);
+        t.DeclareExchange("default.direct", ExchangeType.Direct);
+    });
+
+    cfg.DefaultExchange("default.direct");
+
+    // Type → exchange mapping. The exchange must be declared above; otherwise
+    // Build() throws BareWireConfigurationException (fail-fast per ADR-002:
+    // manual topology).
+    cfg.MapExchange<PaymentRequested>("payments.topic");
+    cfg.MapExchange<OrderCreated>("orders.fanout");
+});
+```
+
+### Exchange Resolution Precedence
+
+When `bus.PublishAsync<T>(...)` sends a message, the target exchange is resolved
+in the following order — from highest to lowest priority:
+
+| # | Source | When it wins |
+|---|---|---|
+| a | Explicit `BW-Exchange` header supplied by the caller in `PublishAsync(msg, headers, ct)` | Always, when present — including an empty value (the `queue:` URI scheme relies on an empty header). |
+| b | Type → exchange mapping from `MapExchange<T>(...)` | When (a) is absent — BareWire injects `BW-Exchange` into the outbound headers. |
+| c | Global `DefaultExchange(...)` | When neither (a) nor (b) applied — the transport adapter falls back to `RabbitMqTransportOptions.DefaultExchange`. |
+| d | None of the above | `BareWireConfigurationException` at publish time — configuration is incomplete. |
+
+This lets `bus.PublishAsync(new PaymentRequested(...), ct)` land on
+`payments.topic` without any extra code at the call site, while a caller that
+*must* force a different exchange (e.g. a MassTransit bridge) can supply
+`BW-Exchange` in the headers dictionary on a per-call basis.
+
 ## Raw Publishing
 
 Publish raw byte payloads when you need full control over the wire format:
