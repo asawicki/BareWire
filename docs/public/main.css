@@ -1,0 +1,124 @@
+/* BareWire custom overrides for DocFX modern template */
+
+:root {
+  --bw-accent: #4c8bf5;
+  --bw-accent-hover: #6ba0ff;
+  --bw-surface: rgba(255, 255, 255, 0.03);
+  --bw-border: rgba(255, 255, 255, 0.08);
+}
+
+/* Hero section */
+.hero {
+  padding: 3rem 0 4rem 0;
+  border-bottom: 1px solid var(--bw-border);
+  margin-bottom: 2.5rem;
+}
+
+.hero .display-2 {
+  background: linear-gradient(135deg, var(--bw-accent) 0%, #9b6bff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  letter-spacing: -0.03em;
+}
+
+.hero .lead {
+  font-size: 1.25rem;
+  opacity: 0.85;
+  max-width: 38rem;
+}
+
+.hero-logo {
+  max-width: 260px;
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 8px 32px rgba(76, 139, 245, 0.25));
+}
+
+/* Feature cards */
+.feature-row {
+  margin: 2rem 0 3rem 0;
+}
+
+.feature-card {
+  background: var(--bw-surface);
+  border: 1px solid var(--bw-border);
+  border-radius: 12px;
+  padding: 1.5rem;
+  height: 100%;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.feature-card:hover {
+  border-color: var(--bw-accent);
+  transform: translateY(-2px);
+}
+
+.feature-card h3 {
+  margin-top: 0;
+  color: var(--bw-accent);
+  font-size: 1.15rem;
+}
+
+.feature-card code {
+  font-size: 0.85em;
+}
+
+/* Stats row */
+.stats-row {
+  margin: 1.5rem 0 3rem 0;
+  text-align: center;
+}
+
+.stat {
+  padding: 1.25rem 0.5rem;
+}
+
+.stat .display-5 {
+  display: block;
+  color: var(--bw-accent);
+  font-weight: 700;
+  line-height: 1.1;
+  margin-bottom: 0.25rem;
+}
+
+.stat span {
+  font-size: 0.85rem;
+  opacity: 0.7;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Primary button accent override */
+.btn-primary {
+  background-color: var(--bw-accent);
+  border-color: var(--bw-accent);
+}
+
+.btn-primary:hover,
+.btn-primary:focus {
+  background-color: var(--bw-accent-hover);
+  border-color: var(--bw-accent-hover);
+}
+
+.btn-outline-primary {
+  color: var(--bw-accent);
+  border-color: var(--bw-accent);
+}
+
+.btn-outline-primary:hover,
+.btn-outline-primary:focus {
+  background-color: var(--bw-accent);
+  border-color: var(--bw-accent);
+  color: #fff;
+}
+
+/* Responsive tweaks */
+@media (max-width: 991.98px) {
+  .hero {
+    padding: 2rem 0 2.5rem 0;
+  }
+  .hero .display-2 {
+    font-size: 3rem;
+  }
+}
